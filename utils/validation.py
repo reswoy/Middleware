@@ -10,10 +10,34 @@ import platform
 
 from config import EXTENSIONES_SOPORTADAS
 
-
 class ValidationUtils:
-    """Utilidades para validación de archivos y sistema."""
-    
+    @staticmethod
+    def validar_payload_label(data):
+        """
+        Valida que el payload JSON para la nueva API de etiquetas sea correcto.
+        """
+        if not data:
+            raise ValueError("No se recibió un cuerpo JSON en la petición.")
+
+        # Validar objetos principales
+        if 'printer' not in data or not isinstance(data['printer'], dict):
+            raise ValueError("El campo 'printer' es requerido y debe ser un objeto.")
+        if 'label' not in data or not isinstance(data['label'], dict):
+            raise ValueError("El campo 'label' es requerido y debe ser un objeto.")
+        if 'data' not in data or not isinstance(data['data'], dict):
+            raise ValueError("El campo 'data' es requerido y debe ser un objeto.")
+
+        # Validar campos anidados requeridos
+        if 'name' not in data['printer']:
+            raise ValueError("El campo 'printer.name' es requerido.")
+        if 'width_mm' not in data['label'] or 'height_mm' not in data['label'] or 'dpi' not in data['label']:
+            raise ValueError("Los campos 'label.width_mm', 'label.height_mm' y 'label.dpi' son requeridos.")
+        if 'product_name' not in data['data'] or 'barcode' not in data['data'] or 'sku' not in data['data']:
+            raise ValueError("Los campos 'data.product_name', 'data.barcode' y 'data.sku' son requeridos.")
+        
+        return True
+
+
     @staticmethod
     def validar_sistema_operativo():
         """
