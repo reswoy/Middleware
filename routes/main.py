@@ -5,14 +5,55 @@ Rutas de la aplicación Flask (blueprints).
 Contiene todos los endpoints de la API.
 """
                                                #--------
-from flask import Blueprint, request, Response, jsonify #<---- agregado por gabriel
+from flask import Blueprint, request, Response, jsonify, render_template #<---- agregado por gabriel
 
 from services import PrintService
 from utils import ValidationUtils
 from impresoraConf import establecer_impresora_actual
 
+
 # Crear blueprint para las rutas principales
 main_bp = Blueprint('main', __name__)
+
+# --- NUEVO ENDPOINT DE IMPRESIÓN DE ETIQUETAS ---
+@main_bp.route('/print/label', methods=['POST'])
+def imprimir_etiqueta_api():
+    try:
+        # 1. Recepción y Validación de Datos
+        datos = request.get_json()
+        ValidationUtils.validar_payload_label(datos)
+        
+        printer_config = datos['printer']
+        label_config = datos['label']
+        data_fields = datos['data']
+        options = datos.get('options', {}) # Obtiene options o un dict vacío si no existe
+
+        # 2. Generación de Contenido Dinámico (Códigos de Barras)
+        barcodes_b64 = PrintService.generar_barcodes_base64(data_fields, options)
+        
+        # 3. Renderizado de la Plantilla HTML
+        # Se combinan los datos originales con los códigos de barras generados
+        contexto_renderizado = {**datos, **barcodes_b64}
+        html_string = render_template('label.html', **contexto_renderizado)
+
+        # 4. Conversión de HTML a Imagen (PNG)
+        imagen_bytes = PrintService.convertir_html_a_imagen(html_string, label_config)
+        
+        # 5. Envío a la Impresora en Windows
+        PrintService.imprimir_imagen_windows(imagen_bytes, printer_config['name'])
+        
+        # 6. Respuesta Exitosa
+        return jsonify({
+            "success": True,
+            "message": f"Trabajo enviado a la impresora '{printer_config['name']}'."
+        }), 200
+
+    except ValueError as e: # Error de validación
+        return jsonify({"success": False, "error": str(e)}), 400
+    except (RuntimeError, ConnectionError, FileNotFoundError) as e: # Error de servidor
+        return jsonify({"success": False, "error": "Error interno del servidor.", "details": str(e)}), 500
+    except Exception as e: # Otros errores inesperados
+        return jsonify({"success": False, "error": "Un error inesperado ha ocurrido.", "details": str(e)}), 500
 
 
 @main_bp.route('/', methods=['GET'])
@@ -118,3 +159,4 @@ def imprimir_pdf():
             status_code = 500 # Internal Server Error
             
         return Response(f"Error: {str(e)}", status=status_code)
+    
