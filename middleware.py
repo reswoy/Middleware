@@ -8,12 +8,23 @@ Punto de entrada principal de la aplicación.
 from app import crear_app
 from config import obtener_ip_local, PORT
 from impresoraConf import obtener_impresora_actual
+from utils.wkhtml_check import ensure_wkhtml_installed  # <-- verificación/instalación wkhtmltopdf
 
 impresora_actual = obtener_impresora_actual()
 
 # --- PUNTO DE ENTRADA DE LA APLICACIÓN ---
 # Este bloque solo se ejecuta cuando el script se corre directamente (ej. 'python middleware.py').
 if __name__ == '__main__':
+    # Intentar asegurar wkhtmltopdf/wkhtmltoimage en Windows
+    wkhtmltoimage_path, wkhtmltopdf_path = ensure_wkhtml_installed()
+    if wkhtmltoimage_path:
+        print(f"✅ wkhtmltoimage detectado en: {wkhtmltoimage_path}")
+    else:
+        # Mensaje requerido si falta. La función ya imprime uno estándar de IMGKit.
+        print("⚠️  wkhtmltoimage no disponible. Algunas funciones de renderizado HTML->imagen podrían fallar.")
+    if wkhtmltopdf_path:
+        print(f"✅ wkhtmltopdf detectado en: {wkhtmltopdf_path}")
+
     # Crear la aplicación usando el factory pattern
     aplicacion = crear_app()
     

@@ -27,8 +27,6 @@ import win32ui
 from pywintypes import error as pywin_error
 
 
-from flask import render_template
-from weasyprint import HTML
 from impresoraConf import obtener_impresora_actual
 from config import ( 
     RUTAS_SUMATRA, 
@@ -36,6 +34,7 @@ from config import (
     TIMEOUT_SUMATRA, 
     TIMEOUT_LIMPIEZA,
 )
+from utils.wkhtml_check import get_imgkit_config  # <-- configuración de imgkit con wkhtmltoimage
 
 
 class PrintService:
@@ -73,13 +72,19 @@ class PrintService:
             # Cálculo crítico de dimensiones en píxeles
             pixel_width = int((config_impresora['ancho_mm'] / 25.4) * dpi)
             pixel_height = int((config_impresora['alto_mm'] / 25.4) * dpi)
-            
+
             options = {
-                'format': 'png', 'width': pixel_width, 'height': pixel_height,
-                'encoding': "UTF-8", 'quiet': ''
+                'format': 'png',
+                'width': pixel_width,
+                'height': pixel_height,
+                'encoding': "UTF-8",
+                'quiet': '',
+                'disable-smart-shrinking': '',  # Desactiva el ajuste automático de tamaño
             }
-            
-            imagen_bytes = imgkit.from_string(html_string, False, options=options)
+
+            # Usar config que apunta al binario correcto de wkhtmltoimage si está disponible
+            cfg = get_imgkit_config()
+            imagen_bytes = imgkit.from_string(html_string, False, options=options, config=cfg)
             return imagen_bytes
         except Exception as e:
             raise RuntimeError(f"Error al convertir HTML a imagen: {str(e)}.")
