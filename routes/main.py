@@ -41,7 +41,7 @@ def imprimir_etiqueta_api(): # O el nombre que prefieras
 
         # 4. Generación de Códigos de Barras
         barcodes_b64 = PrintService.generar_barcodes_base64(datos_producto)
-        
+
         # 5. Renderizado de la Plantilla HTML
         contexto_renderizado = {**datos, **barcodes_b64}
         html_string = render_template('label.html', **contexto_renderizado)
@@ -180,4 +180,4 @@ def imprimir_pdf():
             status_code = 500 # Internal Server Error
             
         return Response(f"Error: {str(e)}", status=status_code)
-    
+

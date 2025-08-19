@@ -68,19 +68,36 @@ class PrintService:
         try:
             # NOTA: El DPI se fija en 300. Para hacerlo dinámico, debe venir en el payload.
             dpi = config_impresora.get('dpi', 300)
-            
-            # Cálculo crítico de dimensiones en píxeles
+
+            # Cálculo crítico de dimensiones en píxeles según DPI real de impresión
             pixel_width = int((config_impresora['ancho_mm'] / 25.4) * dpi)
             pixel_height = int((config_impresora['alto_mm'] / 25.4) * dpi)
+
+            # Escalado: base en 96 DPI de CSS y factor de ajuste opcional
+            CSS_REF_DPI = 96.0
+            factor_escala = config_impresora.get('factor_escala') or config_impresora.get('escala') or 1.0
+            try:
+                factor_escala = float(factor_escala)
+            except Exception:
+                factor_escala = 1.0
+            zoom = max((dpi / CSS_REF_DPI) * max(factor_escala, 0.1), 0.1)
 
             options = {
                 'format': 'png',
                 'width': pixel_width,
                 'height': pixel_height,
+                'zoom': zoom,
+                'disable-smart-width': '',  # respeta el ancho especificado
+                'quality': 100,
                 'encoding': "UTF-8",
-                'quiet': '',
-                'disable-smart-shrinking': '',  # Desactiva el ajuste automático de tamaño
+                'quiet': ''
             }
+
+            # Debug útil para diagnosticar tamaños
+            print(
+                f"Render etiqueta: {config_impresora['ancho_mm']}mm x {config_impresora['alto_mm']}mm | "
+                f"dpi={dpi} | zoom={zoom:.3f} (factor={factor_escala}) | {pixel_width}x{pixel_height}px"
+            )
 
             # Usar config que apunta al binario correcto de wkhtmltoimage si está disponible
             cfg = get_imgkit_config()
