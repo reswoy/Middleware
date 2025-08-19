@@ -44,57 +44,45 @@ class PrintService:
     # Método para validar el payload de la etiqueta #
     
     @staticmethod
-    def generar_barcodes_base64(data, options):
+    def generar_barcodes_base64(datos_producto):
         """Genera códigos de barras en memoria y los devuelve como strings Base64."""
         barcodes = {}
         
         try:
-            # Generar código de barras comercial (EAN-13)
-            ean = barcode.get_barcode_class('ean13')
-            commercial_barcode = ean(data['barcode'], writer=ImageWriter())
-            buffer_commercial = io.BytesIO()
-            commercial_barcode.write(buffer_commercial)
-            b64_commercial = base64.b64encode(buffer_commercial.getvalue()).decode('utf-8')
-            barcodes['commercial_barcode_base64'] = b64_commercial
-
-            # Generar código de barras interno (Code128) si la opción está activa
-            if options.get('print_internal_barcode', False):
-                code128 = barcode.get_barcode_class('code128')
-                internal_barcode = code128(data['sku'], writer=ImageWriter())
-                buffer_internal = io.BytesIO()
-                internal_barcode.write(buffer_internal)
-                b64_internal = base64.b64encode(buffer_internal.getvalue()).decode('utf-8')
-                barcodes['internal_barcode_base64'] = b64_internal
+            # Generar código de barras comercial (EAN-13) si existe
+            if datos_producto.get('codigo_barras'):
+                ean = barcode.get_barcode_class('ean13')
+                commercial_barcode = ean(datos_producto['codigo_barras'], writer=ImageWriter())
+                buffer_commercial = io.BytesIO()
+                commercial_barcode.write(buffer_commercial)
+                b64_commercial = base64.b64encode(buffer_commercial.getvalue()).decode('utf-8')
+                barcodes['commercial_barcode_base64'] = b64_commercial
         
         except Exception as e:
-            raise RuntimeError(f"Error al generar códigos de barras: {str(e)}")
+            raise RuntimeError(f"Error al generar código de barras: {str(e)}")
             
         return barcodes
 
     @staticmethod
-    def convertir_html_a_imagen(html_string, label_config):
+    def convertir_html_a_imagen(html_string, config_impresora):
         """Convierte un string HTML a una imagen PNG en memoria con dimensiones precisas."""
         try:
+            # NOTA: El DPI se fija en 300. Para hacerlo dinámico, debe venir en el payload.
+            dpi = config_impresora.get('dpi', 300)
+            
             # Cálculo crítico de dimensiones en píxeles
-            pixel_width = int((label_config['width_mm'] / 25.4) * label_config['dpi'])
-            pixel_height = int((label_config['height_mm'] / 25.4) * label_config['dpi'])
+            pixel_width = int((config_impresora['ancho_mm'] / 25.4) * dpi)
+            pixel_height = int((config_impresora['alto_mm'] / 25.4) * dpi)
             
             options = {
-                'format': 'png',
-                'width': pixel_width,
-                'height': pixel_height,
-                'encoding': "UTF-8",
-                'custom-header' : [
-                    ('Content-Encoding', 'utf-8'),
-                ],
-                'quiet': '' # Suprime la salida de wkhtmltoimage en la consola
+                'format': 'png', 'width': pixel_width, 'height': pixel_height,
+                'encoding': "UTF-8", 'quiet': ''
             }
             
-            # El argumento 'False' indica que la salida es en memoria (bytes)
             imagen_bytes = imgkit.from_string(html_string, False, options=options)
             return imagen_bytes
         except Exception as e:
-            raise RuntimeError(f"Error al convertir HTML a imagen con imgkit: {str(e)}. Asegúrate de que wkhtmltoimage esté instalado y en el PATH.")
+            raise RuntimeError(f"Error al convertir HTML a imagen: {str(e)}.")
 
     @staticmethod
     def imprimir_imagen_windows(imagen_bytes, nombre_impresora):
