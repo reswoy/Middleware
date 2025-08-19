@@ -10,10 +10,32 @@ import platform
 
 from config import EXTENSIONES_SOPORTADAS
 
-
 class ValidationUtils:
-    """Utilidades para validación de archivos y sistema."""
-    
+    @staticmethod
+    def validar_payload_label(data):
+        """
+        Valida que el payload JSON de Odoo sea correcto.
+        """
+        if not data:
+            raise ValueError("No se recibió un cuerpo JSON en la petición.")
+
+        # Validar objetos principales
+        if 'datos_producto' not in data or not isinstance(data['datos_producto'], dict):
+            raise ValueError("El campo 'datos_producto' es requerido y debe ser un objeto.")
+        if 'config_impresora' not in data or not isinstance(data['config_impresora'], dict):
+            raise ValueError("El campo 'config_impresora' es requerido y debe ser un objeto.")
+        if 'cantidad' not in data or not isinstance(data['cantidad'], int) or data['cantidad'] <= 0:
+            raise ValueError("El campo 'cantidad' es requerido y debe ser un número entero mayor a 0.")
+
+        # Validar campos anidados requeridos
+        if 'nombre' not in data['datos_producto'] or 'referencia_interna' not in data['datos_producto']:
+            raise ValueError("Los campos 'nombre' y 'referencia_interna' son requeridos en 'datos_producto'.")
+        if 'ancho_mm' not in data['config_impresora'] or 'alto_mm' not in data['config_impresora']:
+            raise ValueError("Los campos 'ancho_mm' y 'alto_mm' son requeridos en 'config_impresora'.")
+        
+        return True
+
+
     @staticmethod
     def validar_sistema_operativo():
         """

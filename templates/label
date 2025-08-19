@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Etiqueta</title>
+    <style>
+        body, p { margin: 0; padding: 0; }
+        body {
+            font-family: Arial, sans-serif;
+            width: {{ config_impresora.ancho_mm }}mm;
+            height: {{ config_impresora.alto_mm }}mm;
+            box-sizing: border-box;
+            padding: 3mm;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .product-name { font-size: 12pt; font-weight: bold; text-align: center; }
+        .details p { font-size: 9pt; margin-bottom: 2px; }
+        .details strong { font-weight: bold; }
+        .barcode-section { text-align: center; }
+        .barcode-section img { max-width: 95%; height: auto; }
+        .barcode-label { font-size: 8pt; letter-spacing: 2px; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <p class="product-name">{{ datos_producto.nombre }}</p>
+    </div>
+
+    <div class="details">
+        <p><strong>Ref:</strong> {{ datos_producto.referencia_interna }}</p>
+        
+        {# --- CAMPOS OPCIONALES --- #}
+        {% if datos_producto.numero_lote_serial %}
+            <p><strong>Lote:</strong> {{ datos_producto.numero_lote_serial }}</p>
+        {% endif %}
+        {% if datos_producto.fecha_vencimiento %}
+            <p><strong>Venc:</strong> {{ datos_producto.fecha_vencimiento }}</p>
+        {% endif %}
+    </div>
+
+    <div class="barcode-section">
+        {# Código de barras comercial #}
+        {% if commercial_barcode_base64 %}
+            <img src="data:image/png;base64,{{ commercial_barcode_base64 }}">
+            <p class="barcode-label">{{ datos_producto.codigo_barras }}</p>
+        {% endif %}
+    </div>
+
+</body>
+</html>

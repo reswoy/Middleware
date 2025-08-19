@@ -11,11 +11,24 @@ import tempfile
 import threading
 import time
 import uuid
+import io
+import base64
 
 #Libreria Externas
 import win32api
 import wmi
 import pythoncom
+import imgkit
+import barcode
+from barcode.writer import ImageWriter
+from PIL import Image, ImageWin
+import win32print
+import win32ui
+from pywintypes import error as pywin_error
+
+
+from flask import render_template
+from weasyprint import HTML
 from impresoraConf import obtener_impresora_actual
 from config import ( 
     RUTAS_SUMATRA, 
@@ -28,6 +41,88 @@ from config import (
 class PrintService:
     """Servicio encargado de manejar todas las operaciones de impresión."""
     
+    # Método para validar el payload de la etiqueta #
+    
+    @staticmethod
+    def generar_barcodes_base64(datos_producto):
+        """Genera códigos de barras en memoria y los devuelve como strings Base64."""
+        barcodes = {}
+        
+        try:
+            # Generar código de barras comercial (EAN-13) si existe
+            if datos_producto.get('codigo_barras'):
+                ean = barcode.get_barcode_class('ean13')
+                commercial_barcode = ean(datos_producto['codigo_barras'], writer=ImageWriter())
+                buffer_commercial = io.BytesIO()
+                commercial_barcode.write(buffer_commercial)
+                b64_commercial = base64.b64encode(buffer_commercial.getvalue()).decode('utf-8')
+                barcodes['commercial_barcode_base64'] = b64_commercial
+        
+        except Exception as e:
+            raise RuntimeError(f"Error al generar código de barras: {str(e)}")
+            
+        return barcodes
+
+    @staticmethod
+    def convertir_html_a_imagen(html_string, config_impresora):
+        """Convierte un string HTML a una imagen PNG en memoria con dimensiones precisas."""
+        try:
+            # NOTA: El DPI se fija en 300. Para hacerlo dinámico, debe venir en el payload.
+            dpi = config_impresora.get('dpi', 300)
+            
+            # Cálculo crítico de dimensiones en píxeles
+            pixel_width = int((config_impresora['ancho_mm'] / 25.4) * dpi)
+            pixel_height = int((config_impresora['alto_mm'] / 25.4) * dpi)
+            
+            options = {
+                'format': 'png', 'width': pixel_width, 'height': pixel_height,
+                'encoding': "UTF-8", 'quiet': ''
+            }
+            
+            imagen_bytes = imgkit.from_string(html_string, False, options=options)
+            return imagen_bytes
+        except Exception as e:
+            raise RuntimeError(f"Error al convertir HTML a imagen: {str(e)}.")
+
+    @staticmethod
+    def imprimir_imagen_windows(imagen_bytes, nombre_impresora):
+        """Envía una imagen (en bytes) directamente al spooler de impresión de Windows."""
+        hPrinter = None
+        try:
+            # Cargar la imagen desde bytes usando Pillow
+            image_file = io.BytesIO(imagen_bytes)
+            img = Image.open(image_file)
+
+            # Abrir la impresora
+            hPrinter = win32print.OpenPrinter(nombre_impresora)
+            
+            # Crear un Device Context (DC) para la impresora
+            hDC = win32ui.CreateDC()
+            hDC.CreatePrinterDC(nombre_impresora)
+            
+            # Convertir la imagen de Pillow a un Device Independent Bitmap (DIB)
+            dib = ImageWin.Dib(img)
+            
+            # Iniciar trabajo de impresión
+            hDC.StartDoc(f"Etiqueta-{uuid.uuid4().hex}")
+            hDC.StartPage()
+            
+            # Dibujar el DIB en el DC de la impresora
+            dib.draw(hDC.GetHandleOutput(), (0, 0, img.width, img.height))
+            
+            # Finalizar trabajo
+            hDC.EndPage()
+            hDC.EndDoc()
+            hDC.DeleteDC()
+            
+        except pywin_error as e:
+            raise ConnectionError(f"Error de pywin32 al imprimir: {str(e)}. Verifica que el nombre de la impresora '{nombre_impresora}' sea correcto.")
+        except Exception as e:
+            raise RuntimeError(f"Error inesperado durante el proceso de impresión en Windows: {str(e)}")
+        finally:
+            if hPrinter:
+                win32print.ClosePrinter(hPrinter)
+
     @staticmethod
     def guardar_archivo_temporal(archivo):
         """
@@ -83,29 +178,26 @@ class PrintService:
             raise Exception(f"Error al imprimir con PowerShell: {mensaje_error}")
     
     @staticmethod
-    def imprimir_pdf(ruta_archivo):
+    def imprimir_pdf(ruta_archivo, nombre_impresora=None):
         """
-        Imprime un archivo PDF usando SumatraPDF.
+        Imprime un archivo PDF. Si no se especifica un nombre de impresora,
+        usa la que está guardada por defecto.
+        """
+        # Si no se pasa un nombre de impresora, usamos la global.
+        if nombre_impresora is None:
+            nombre_impresora = obtener_impresora_actual()
         
-        Args:
-            ruta_archivo (str): Ruta del archivo a imprimir
-            
-        Raises:
-            Exception: Si hay error en la impresión o no se encuentra SumatraPDF
-        """
-        nombre_impresora = obtener_impresora_actual() # <-- OBTENER IMPRESORA ACTUAL
         print(f"Intentando imprimir PDF con SumatraPDF en '{nombre_impresora}'...")
-    
         sumatra_encontrado = False
         for ruta_sumatra in RUTAS_SUMATRA:
             ruta_expandida = os.path.expanduser(ruta_sumatra)
             if os.path.exists(ruta_expandida):
                 print(f"SumatraPDF encontrado en: {ruta_expandida}")
-                
                 resultado = subprocess.run([
                     ruta_expandida,
-                    "-print-to", nombre_impresora, # <-- Usar la variable
+                    "-print-to", nombre_impresora, # Usar la variable correcta
                     "-silent",
+                    "-exit-on-print", # Asegura que Sumatra cierre después de imprimir
                     ruta_archivo
                 ], capture_output=True, text=True, timeout=TIMEOUT_SUMATRA, check=False)
                 
@@ -113,15 +205,11 @@ class PrintService:
                 if resultado.returncode == 0:
                     print("PDF enviado a la impresora usando SumatraPDF.")
                 else:
-                    print(f"Error con SumatraPDF: {resultado.stderr}")
-                    raise Exception("SumatraPDF falló al intentar imprimir.")
+                    raise Exception(f"SumatraPDF falló al intentar imprimir: {resultado.stderr}")
                 break
         
         if not sumatra_encontrado:
-            raise Exception("SumatraPDF no encontrado en las rutas habituales. Por favor, instálalo.")
-        
-        if not sumatra_encontrado:
-            raise Exception("SumatraPDF no encontrado en las rutas habituales. Por favor, instálalo.")
+            raise Exception("SumatraPDF no encontrado en las rutas habituales.")
     
     @staticmethod
     def imprimir_con_respaldo(ruta_archivo):
@@ -154,10 +242,11 @@ class PrintService:
             impresoras_detalladas = []
 
             for printer in c.Win32_Printer():
-                esta_en_linea = printer.WorkOffline is False
-                estado_listo = printer.PrinterStatus == 3 or printer.PrinterStatus == 4
+                # El filtro definitivo y más preciso
+                es_fisicamente_online = (printer.PrinterState & 16) == 0 
+                esta_lista_para_imprimir = printer.PrinterStatus == 3
 
-                if esta_en_linea and estado_listo:
+                if es_fisicamente_online and esta_lista_para_imprimir:
                     port_name = printer.PortName
                     port = port_name
             
@@ -223,24 +312,27 @@ class PrintService:
     @classmethod
     def procesar_impresion(cls, archivo):
         """
-        Método principal que orquesta todo el proceso de impresión.
+        Orquesta la impresión de un ARCHIVO SUBIDO y devuelve un booleano de éxito.
         """
         ruta_archivo = cls.guardar_archivo_temporal(archivo)
-        
+        exito = False
+
         try:
             _, extension = os.path.splitext(archivo.filename)
-            extension = extension.lower()
-            
-            if extension == '.txt':
+            if extension.lower() == '.txt':
                 cls.imprimir_txt(ruta_archivo)
-            elif extension == '.pdf':
+            elif extension.lower() == '.pdf':
                 cls.imprimir_pdf(ruta_archivo)
-            
+            exito = True
         except Exception as e:
             print(f"ERROR en método principal: {str(e)}")
-            cls.imprimir_con_respaldo(ruta_archivo)
-        
+            try:
+                # Intenta el respaldo y actualiza el éxito basado en su resultado
+                exito = cls.imprimir_con_respaldo(ruta_archivo)
+            except Exception as e_respaldo:
+                print(f"ERROR en método de respaldo: {str(e_respaldo)}")
+                exito = False
         finally:
             cls.programar_limpieza(ruta_archivo)
         
-        return True
+        return exito

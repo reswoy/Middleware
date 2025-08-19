@@ -22,5 +22,5 @@ def crear_app():
     
     # Registrar blueprints
     app.register_blueprint(main_bp)
-    
+
     return app
