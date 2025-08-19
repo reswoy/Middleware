@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Etiqueta</title>
+    <style>
+        /* CSS Reseteo Básico */
+        body, h1, p { margin: 0; padding: 0; }
+
+        /* Estilos para que el cuerpo ocupe exactamente el tamaño de la etiqueta */
+        body {
+            font-family: Arial, sans-serif;
+            width: {{ label.width_mm }}mm;
+            height: {{ label.height_mm }}mm;
+            bsizing: ox-border-box;
+            padding: 3mm; /* Un pequeño margen interno */
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between; /* Distribuye el espacio */
+        }
+
+        /* Estilos de los textos */
+        .product-name {
+            font-size: 12pt;
+            font-weight: bold;
+            text-align: center;
+        }
+
+        .details p {
+            font-size: 9pt;
+            margin-bottom: 2px;
+        }
+
+        .details strong {
+            font-weight: bold;
+        }
+
+        /* Estilos para los códigos de barras */
+        .barcode-section {
+            text-align: center;
+        }
+
+        .barcode-section img {
+            max-width: 95%; /* Asegura que la imagen no se desborde */
+            height: auto;
+        }
+
+        .barcode-label {
+            font-size: 8pt;
+            letter-spacing: 2px; /* Aumenta el espaciado para legibilidad */
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <p class="product-name">{{ data.product_name }}</p>
+    </div>
+
+    <div class="details">
+        <p><strong>SKU:</strong> {{ data.sku }}</p>
+        
+        {# Bucle para mostrar los campos opcionales dinámicamente #}
+        {% for key, value in data.optional_fields.items() %}
+            {% if value %} {# Solo muestra el campo si tiene un valor #}
+                <p><strong>{{ key }}:</strong> {{ value }}</p>
+            {% endif %}
+        {% endfor %}
+    </div>
+
+    <div class="barcode-section">
+        {# Código de barras principal (EAN-13) #}
+        <img src="data:image/png;base64,{{ commercial_barcode_base64 }}">
+        <p class="barcode-label">{{ data.barcode }}</p>
+
+        {# Código de barras interno (Code128), se muestra solo si existe #}
+        {% if internal_barcode_base64 %}
+            <img src="data:image/png;base64,{{ internal_barcode_base64 }}" style="margin-top: 5px;">
+            <p class="barcode-label">{{ data.sku }}</p>
+        {% endif %}
+    </div>
+
+</body>
+</html>
