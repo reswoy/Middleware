@@ -6,10 +6,12 @@ Contiene todos los endpoints de la API.
 """
                                                #--------
 from flask import Blueprint, request, Response, jsonify, render_template #<---- agregado por gabriel
+import traceback
 
+from impresoraConf import obtener_impresora_actual
+from impresoraConf import establecer_impresora_actual
 from services import PrintService
 from utils import ValidationUtils
-from impresoraConf import establecer_impresora_actual
 
 
 # Crear blueprint para las rutas principales
@@ -17,43 +19,62 @@ main_bp = Blueprint('main', __name__)
 
 # --- NUEVO ENDPOINT DE IMPRESIÓN DE ETIQUETAS ---
 @main_bp.route('/print/label', methods=['POST'])
-def imprimir_etiqueta_api():
+def imprimir_etiqueta_api(): # O el nombre que prefieras
     try:
-        # 1. Recepción y Validación de Datos
+        # 1. Recepción y Validación del Payload en Español (esto ya estaba bien)
         datos = request.get_json()
         ValidationUtils.validar_payload_label(datos)
         
-        printer_config = datos['printer']
-        label_config = datos['label']
-        data_fields = datos['data']
-        options = datos.get('options', {}) # Obtiene options o un dict vacío si no existe
+        # --- INICIO DE LA CORRECCIÓN ---
+        # 2. Extraer datos usando las claves correctas en español
+        datos_producto = datos['datos_producto']
+        config_impresora = datos['config_impresora']
+        cantidad = datos['cantidad']
 
-        # 2. Generación de Contenido Dinámico (Códigos de Barras)
-        barcodes_b64 = PrintService.generar_barcodes_base64(data_fields, options)
+        # 3. Obtener la impresora predeterminada del middleware (ya que no viene en el payload)
+        nombre_impresora = obtener_impresora_actual()
+        if not nombre_impresora:
+            raise ConnectionError("No hay una impresora predeterminada configurada en el middleware.")
         
-        # 3. Renderizado de la Plantilla HTML
-        # Se combinan los datos originales con los códigos de barras generados
+        print(f"Petición para imprimir {cantidad} etiquetas en la impresora predeterminada '{nombre_impresora}'")
+        # --- FIN DE LA CORRECCIÓN ---
+
+        # 4. Generación de Códigos de Barras
+        barcodes_b64 = PrintService.generar_barcodes_base64(datos_producto)
+        
+        # 5. Renderizado de la Plantilla HTML
         contexto_renderizado = {**datos, **barcodes_b64}
         html_string = render_template('label.html', **contexto_renderizado)
 
-        # 4. Conversión de HTML a Imagen (PNG)
-        imagen_bytes = PrintService.convertir_html_a_imagen(html_string, label_config)
+        # 6. Conversión de HTML a Imagen (PNG)
+        imagen_bytes = PrintService.convertir_html_a_imagen(html_string, config_impresora)
         
-        # 5. Envío a la Impresora en Windows
-        PrintService.imprimir_imagen_windows(imagen_bytes, printer_config['name'])
+        # 7. Bucle de Envío a la Impresora
+        for i in range(cantidad):
+            print(f"Enviando copia {i + 1}/{cantidad} a '{nombre_impresora}'...")
+            PrintService.imprimir_imagen_windows(imagen_bytes, nombre_impresora)
         
-        # 6. Respuesta Exitosa
+        # 8. Respuesta Exitosa
         return jsonify({
             "success": True,
-            "message": f"Trabajo enviado a la impresora '{printer_config['name']}'."
+            "message": f"{cantidad} etiqueta(s) enviada(s) a la impresora '{nombre_impresora}'."
         }), 200
 
-    except ValueError as e: # Error de validación
-        return jsonify({"success": False, "error": str(e)}), 400
-    except (RuntimeError, ConnectionError, FileNotFoundError) as e: # Error de servidor
-        return jsonify({"success": False, "error": "Error interno del servidor.", "details": str(e)}), 500
-    except Exception as e: # Otros errores inesperados
-        return jsonify({"success": False, "error": "Un error inesperado ha ocurrido.", "details": str(e)}), 500
+    except Exception as e:
+        # El bloque de manejo de errores que tenías es muy bueno, lo mantenemos
+        error_details = traceback.format_exc()
+        print("--- TRACEBACK DETALLADO DEL ERROR ---")
+        print(error_details)
+        print("-------------------------------------")
+        
+        if isinstance(e, ValueError):
+             return jsonify({"success": False, "error": str(e)}), 400
+        
+        return jsonify({
+            "success": False, 
+            "error": "Un error inesperado ha ocurrido en el middleware.", 
+            "details": str(e)
+        }), 500
 
 
 @main_bp.route('/', methods=['GET'])
