@@ -6,12 +6,14 @@ Contiene todas las constantes y configuraciones centralizadas.
 """
 
 import socket
+import os
 
 # --- CONFIGURACIÓN PRINCIPAL ---
 # IMPORTANTE: Aquí debes poner el nombre exacto de tu impresora como aparece en Windows.
 # Puedes encontrarlo en "Dispositivos e impresoras" o ejecutando en PowerShell: Get-Printer
 
 NOMBRE_ARCHIVO_GUARDADO = "impresora_guardada.txt"
+API_KEYS = os.getenv("RELEX_API_KEYS", "b4Xrjpa36vhNBfZpoJuD5XtyuSQqXmxA").split(",")
 
 
 # Configuración del servidor
