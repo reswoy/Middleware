@@ -19,63 +19,50 @@ main_bp = Blueprint('main', __name__)
 
 # --- NUEVO ENDPOINT DE IMPRESIÓN DE ETIQUETAS ---
 @main_bp.route('/print/label', methods=['POST'])
-def imprimir_etiqueta_api(): # O el nombre que prefieras
+def imprimir_etiqueta_api():
+    ruta_temporal = None
     try:
-        # 1. Recepción y Validación del Payload en Español (esto ya estaba bien)
         datos = request.get_json()
         ValidationUtils.validar_payload_label(datos)
-        
-        # --- INICIO DE LA CORRECCIÓN ---
-        # 2. Extraer datos usando las claves correctas en español
+
         datos_producto = datos['datos_producto']
         config_impresora = datos['config_impresora']
         cantidad = datos['cantidad']
-
-        # 3. Obtener la impresora predeterminada del middleware (ya que no viene en el payload)
         nombre_impresora = obtener_impresora_actual()
-        if not nombre_impresora:
-            raise ConnectionError("No hay una impresora predeterminada configurada en el middleware.")
-        
-        print(f"Petición para imprimir {cantidad} etiquetas en la impresora predeterminada '{nombre_impresora}'")
-        # --- FIN DE LA CORRECCIÓN ---
 
-        # 4. Generación de Códigos de Barras
         barcodes_b64 = PrintService.generar_barcodes_base64(datos_producto)
-        
-        # 5. Renderizado de la Plantilla HTML
         contexto_renderizado = {**datos, **barcodes_b64}
         html_string = render_template('label.html', **contexto_renderizado)
 
-        # 6. Conversión de HTML a Imagen (PNG)
-        imagen_bytes = PrintService.convertir_html_a_imagen(html_string, config_impresora)
-        
-        # 7. Bucle de Envío a la Impresora
+        ancho_mm = config_impresora['ancho_mm']
+        alto_mm = config_impresora['alto_mm']
+
+        ruta_temporal = PrintService.convertir_html_a_imagen(html_string, ancho_mm, alto_mm)
+
         for i in range(cantidad):
-            print(f"Enviando copia {i + 1}/{cantidad} a '{nombre_impresora}'...")
-            PrintService.imprimir_imagen_windows(imagen_bytes, nombre_impresora)
-        
-        # 8. Respuesta Exitosa
+            print(f"Enviando copia de imagen {i + 1}/{cantidad} a '{nombre_impresora}'...")
+            PrintService.imprimir_imagen(ruta_temporal, nombre_impresora)
+
         return jsonify({
             "success": True,
             "message": f"{cantidad} etiqueta(s) enviada(s) a la impresora '{nombre_impresora}'."
         }), 200
 
     except Exception as e:
-        # El bloque de manejo de errores que tenías es muy bueno, lo mantenemos
         error_details = traceback.format_exc()
-        print("--- TRACEBACK DETALLADO DEL ERROR ---")
+        print("--- ERROR DETALLADO EN /print/label ---")
         print(error_details)
-        print("-------------------------------------")
-        
-        if isinstance(e, ValueError):
-             return jsonify({"success": False, "error": str(e)}), 400
-        
         return jsonify({
-            "success": False, 
-            "error": "Un error inesperado ha ocurrido en el middleware.", 
+            "success": False,
+            "error": "Ocurrió un error interno en el middleware.",
             "details": str(e)
         }), 500
 
+    finally:
+        # --- CAMBIO IMPORTANTE: Comentamos la limpieza para poder inspeccionar el archivo ---
+        if ruta_temporal:
+            # PrintService.programar_limpieza(ruta_temporal)
+            print(f"!! MODO DEBUG: La limpieza del archivo temporal '{ruta_temporal}' está desactivada.")
 
 @main_bp.route('/', methods=['GET'])
 def estado_salud():
@@ -180,4 +167,3 @@ def imprimir_pdf():
             status_code = 500 # Internal Server Error
             
         return Response(f"Error: {str(e)}", status=status_code)
-    
