@@ -1,53 +1,78 @@
 <!DOCTYPE html>
-<html lang="es">
+<html>
 <head>
     <meta charset="UTF-8">
-    <title>Etiqueta</title>
+    <title>Etiqueta para Redimensionar</title>
     <style>
-        body, p { margin: 0; padding: 0; }
-        body {
+        /* Ya no necesitamos la directiva @page */
+        html, body {
+            width: 100%;
+            height: auto; /* La altura crecerá según el contenido */
+            margin: 0;
+            padding: 0;
             font-family: Arial, sans-serif;
-            width: {{ config_impresora.ancho_mm }}mm;
-            height: {{ config_impresora.alto_mm }}mm;
+            background-color: white;
             box-sizing: border-box;
-            padding: 3mm;
+        }
+
+        .container {
+            width: 100%;
+            padding: 20px; /* Padding generoso en píxeles */
+            box-sizing: border-box;
             display: flex;
             flex-direction: column;
-            justify-content: space-between;
+            align-items: center;
+            gap: 15px; /* Espacio generoso entre elementos */
         }
-        .product-name { font-size: 12pt; font-weight: bold; text-align: center; }
-        .details p { font-size: 9pt; margin-bottom: 2px; }
-        .details strong { font-weight: bold; }
-        .barcode-section { text-align: center; }
-        .barcode-section img { max-width: 95%; height: auto; }
-        .barcode-label { font-size: 8pt; letter-spacing: 2px; }
+        
+        .text-content {
+            width: 100%;
+            text-align: center;
+        }
+        
+        p { margin: 3px 0; }
+
+        /* Usamos fuentes grandes porque sabemos que luego se van a encoger */
+        .product-name {
+            font-weight: bold;
+            font-size: 20pt; 
+        }
+        
+        .details {
+            text-align: left;
+            font-size: 16pt;
+        }
+        
+        .barcode-content {
+            width: 100%;
+            text-align: center;
+        }
+
+        .barcode-content img {
+            max-width: 100%;
+        }
+        
+        .barcode-label {
+            font-size: 14pt;
+        }
     </style>
 </head>
 <body>
-
-    <div class="header">
-        <p class="product-name">{{ datos_producto.nombre }}</p>
-    </div>
-
-    <div class="details">
-        <p><strong>Ref:</strong> {{ datos_producto.referencia_interna }}</p>
+    <div class="container">
+        <div class="text-content">
+            <p class="product-name">{{ datos_producto.nombre }}</p>
+            <div class="details">
+                <p>Ref: {{ datos_producto.referencia_interna }}</p>
+                <p>Lote: {{ datos_producto.numero_lote_serial }}</p>
+            </div>
+        </div>
         
-        {# --- CAMPOS OPCIONALES --- #}
-        {% if datos_producto.numero_lote_serial %}
-            <p><strong>Lote:</strong> {{ datos_producto.numero_lote_serial }}</p>
-        {% endif %}
-        {% if datos_producto.fecha_vencimiento %}
-            <p><strong>Venc:</strong> {{ datos_producto.fecha_vencimiento }}</p>
-        {% endif %}
+        <div class="barcode-content">
+            {% if commercial_barcode_base64 %}
+                <img src="data:image/png;base64,{{ commercial_barcode_base64 }}">
+                <p class="barcode-label">{{ datos_producto.codigo_barras }}</p>
+            {% endif %}
+        </div>
     </div>
-
-    <div class="barcode-section">
-        {# Código de barras comercial #}
-        {% if commercial_barcode_base64 %}
-            <img src="data:image/png;base64,{{ commercial_barcode_base64 }}">
-            <p class="barcode-label">{{ datos_producto.codigo_barras }}</p>
-        {% endif %}
-    </div>
-
 </body>
 </html>
