@@ -25,8 +25,11 @@ from PIL import Image, ImageWin
 import win32print
 import win32ui
 from pywintypes import error as pywin_error
+import win32con
+import win32gui 
+from weasyprint import HTML
 
-
+from flask import render_template
 from impresoraConf import obtener_impresora_actual
 from config import ( 
     RUTAS_SUMATRA, 
@@ -46,104 +49,104 @@ class PrintService:
     def generar_barcodes_base64(datos_producto):
         """Genera códigos de barras en memoria y los devuelve como strings Base64."""
         barcodes = {}
-        
+
         try:
-            # Generar código de barras comercial (EAN-13) si existe
             if datos_producto.get('codigo_barras'):
+                
+                # --- INICIO DE LA CORRECCIÓN ---
+                # Las opciones de renderizado se mantienen en un diccionario.
+                writer_options = {
+                    'module_height': 7.0,
+                    'font_size': 8,
+                    'text_distance': 3.0,
+                    'quiet_zone': 2.0
+                }
+                
+                # El ImageWriter se crea SIN opciones.
+                writer = ImageWriter()
+                # --- FIN DE LA CORRECCIÓN ---
+
                 ean = barcode.get_barcode_class('ean13')
-                commercial_barcode = ean(datos_producto['codigo_barras'], writer=ImageWriter())
+                commercial_barcode = ean(datos_producto['codigo_barras'], writer=writer) 
+                
                 buffer_commercial = io.BytesIO()
-                commercial_barcode.write(buffer_commercial)
+                # --- CORRECCIÓN CLAVE: Pasamos las opciones aquí, en el método .write() ---
+                commercial_barcode.write(buffer_commercial, writer_options)
+                
                 b64_commercial = base64.b64encode(buffer_commercial.getvalue()).decode('utf-8')
                 barcodes['commercial_barcode_base64'] = b64_commercial
-        
+
         except Exception as e:
             raise RuntimeError(f"Error al generar código de barras: {str(e)}")
-            
+
         return barcodes
 
     @staticmethod
-    def convertir_html_a_imagen(html_string, config_impresora):
-        """Convierte un string HTML a una imagen PNG en memoria con dimensiones precisas."""
+    def convertir_html_a_pdf(html_string):
+        """Convierte un string HTML a un archivo PDF temporal."""
         try:
-            # NOTA: El DPI se fija en 300. Para hacerlo dinámico, debe venir en el payload.
-            dpi = config_impresora.get('dpi', 300)
-
-            # Cálculo crítico de dimensiones en píxeles según DPI real de impresión
-            pixel_width = int((config_impresora['ancho_mm'] / 25.4) * dpi)
-            pixel_height = int((config_impresora['alto_mm'] / 25.4) * dpi)
-
-            # Escalado: base en 96 DPI de CSS y factor de ajuste opcional
-            CSS_REF_DPI = 96.0
-            factor_escala = config_impresora.get('factor_escala') or config_impresora.get('escala') or 1.0
-            try:
-                factor_escala = float(factor_escala)
-            except Exception:
-                factor_escala = 1.0
-            zoom = max((dpi / CSS_REF_DPI) * max(factor_escala, 0.1), 0.1)
-
-            options = {
-                'format': 'png',
-                'width': pixel_width,
-                'height': pixel_height,
-                'zoom': zoom,
-                'disable-smart-width': '',  # respeta el ancho especificado
-                'quality': 100,
-                'encoding': "UTF-8",
-                'quiet': ''
-            }
-
-            # Debug útil para diagnosticar tamaños
-            print(
-                f"Render etiqueta: {config_impresora['ancho_mm']}mm x {config_impresora['alto_mm']}mm | "
-                f"dpi={dpi} | zoom={zoom:.3f} (factor={factor_escala}) | {pixel_width}x{pixel_height}px"
+            ruta_pdf_temporal = os.path.join(
+                tempfile.gettempdir(), 
+                f"label_generada_{uuid.uuid4().hex}.pdf"
             )
-
-            # Usar config que apunta al binario correcto de wkhtmltoimage si está disponible
-            cfg = get_imgkit_config()
-            imagen_bytes = imgkit.from_string(html_string, False, options=options, config=cfg)
-            return imagen_bytes
+            # WeasyPrint crea el PDF a partir del string HTML
+            HTML(string=html_string).write_pdf(ruta_pdf_temporal)
+            print(f"PDF de etiqueta generado en: {ruta_pdf_temporal}")
+            return ruta_pdf_temporal
         except Exception as e:
-            raise RuntimeError(f"Error al convertir HTML a imagen: {str(e)}.")
+            raise RuntimeError(f"Error al convertir HTML a PDF con WeasyPrint: {str(e)}")
 
     @staticmethod
-    def imprimir_imagen_windows(imagen_bytes, nombre_impresora):
-        """Envía una imagen (en bytes) directamente al spooler de impresión de Windows."""
-        hPrinter = None
-        try:
-            # Cargar la imagen desde bytes usando Pillow
-            image_file = io.BytesIO(imagen_bytes)
-            img = Image.open(image_file)
+    def imprimir_pdf_generico(ruta_pdf, nombre_impresora, ancho_mm, alto_mm):
+        """
+        Imprime un archivo PDF usando SumatraPDF, detectando automáticamente la
+        orientación correcta (vertical u horizontal) y deshabilitando el escalado.
+        """
+        print(f"Intentando imprimir PDF en '{nombre_impresora}'...")
 
-            # Abrir la impresora
-            hPrinter = win32print.OpenPrinter(nombre_impresora)
-            
-            # Crear un Device Context (DC) para la impresora
-            hDC = win32ui.CreateDC()
-            hDC.CreatePrinterDC(nombre_impresora)
-            
-            # Convertir la imagen de Pillow a un Device Independent Bitmap (DIB)
-            dib = ImageWin.Dib(img)
-            
-            # Iniciar trabajo de impresión
-            hDC.StartDoc(f"Etiqueta-{uuid.uuid4().hex}")
-            hDC.StartPage()
-            
-            # Dibujar el DIB en el DC de la impresora
-            dib.draw(hDC.GetHandleOutput(), (0, 0, img.width, img.height))
-            
-            # Finalizar trabajo
-            hDC.EndPage()
-            hDC.EndDoc()
-            hDC.DeleteDC()
-            
-        except pywin_error as e:
-            raise ConnectionError(f"Error de pywin32 al imprimir: {str(e)}. Verifica que el nombre de la impresora '{nombre_impresora}' sea correcto.")
-        except Exception as e:
-            raise RuntimeError(f"Error inesperado durante el proceso de impresión en Windows: {str(e)}")
-        finally:
-            if hPrinter:
-                win32print.ClosePrinter(hPrinter)
+        # --- INICIO DEL CAMBIO: LÓGICA DE ORIENTACIÓN AUTOMÁTICA ---
+        # Si el ancho es mayor o igual al alto, es una etiqueta horizontal (landscape).
+        # De lo contrario, es vertical (portrait).
+        if ancho_mm >= alto_mm:
+            orientacion = "landscape"
+        else:
+            orientacion = "portrait"
+
+        print(f"Orientación detectada para la etiqueta: {orientacion.upper()}")
+
+        # Se construye el comando de configuración de impresión dinámicamente.
+        print_settings = f"{orientacion},noscale"
+        # --- FIN DEL CAMBIO ---
+
+        for ruta_sumatra in RUTAS_SUMATRA:
+            ruta_expandida = os.path.expanduser(ruta_sumatra)
+            if os.path.exists(ruta_expandida):
+                print(f"SumatraPDF encontrado en: {ruta_expandida}")
+
+                comando = [
+                    ruta_expandida,
+                    "-print-to", nombre_impresora,
+                    "-print-settings", print_settings, # <--- SE USA LA CONFIGURACIÓN DINÁMICA
+                    "-silent",
+                    "-exit-on-print",
+                    ruta_pdf
+                ]
+
+                resultado = subprocess.run(
+                    comando,
+                    capture_output=True,
+                    text=True,
+                    timeout=TIMEOUT_SUMATRA,
+                    check=False
+                )
+
+                if resultado.returncode == 0:
+                    print(f"PDF enviado a la impresora con orientación '{orientacion}' y sin escalado.")
+                    return True
+                else:
+                    raise RuntimeError(f"SumatraPDF falló: {resultado.stderr}")
+
+        raise FileNotFoundError("SumatraPDF no encontrado en las rutas configuradas.")
 
     @staticmethod
     def guardar_archivo_temporal(archivo):
@@ -357,4 +360,116 @@ class PrintService:
         finally:
             cls.programar_limpieza(ruta_archivo)
         
+        return exito
+
+    @staticmethod
+    def convertir_html_a_imagen(html_string, ancho_mm, alto_mm):
+        """
+        Convierte HTML a una imagen, permitiendo que la altura inicial sea variable,
+        y luego la redimensiona a las dimensiones exactas de la etiqueta.
+        """
+        try:
+            ruta_imagen_temporal = os.path.join(
+                tempfile.gettempdir(),
+                f"label_generada_{uuid.uuid4().hex}.png"
+            )
+
+            dpi = 300
+            pixel_width = int((ancho_mm / 25.4) * dpi)
+            pixel_height = int((alto_mm / 25.4) * dpi)
+
+            print(f"Paso 1: Generando imagen fuente (alto variable)...")
+            
+            # Opciones para generar la imagen inicial. Notar que quitamos height y crop.
+            options = {
+                'width': pixel_width,
+                'disable-smart-width': '',
+                'encoding': "UTF-8",
+            }
+
+            config = get_imgkit_config()
+            # 1. Generar la imagen. Será tan alta como necesite el contenido.
+            imgkit.from_string(html_string, ruta_imagen_temporal, options=options, config=config)
+            
+            print(f"Paso 2: Redimensionando imagen a las dimensiones finales ({pixel_width}x{pixel_height} px)...")
+            
+            # 2. Abrir la imagen generada con Pillow
+            img = Image.open(ruta_imagen_temporal)
+            
+            # 3. Redimensionarla al tamaño exacto de la etiqueta usando un filtro de alta calidad
+            img_resized = img.resize((pixel_width, pixel_height), Image.Resampling.LANCZOS)
+            
+            # 4. Guardar la imagen ya redimensionada, sobreescribiendo la original
+            img_resized.save(ruta_imagen_temporal)
+
+            print(f"Imagen final generada y redimensionada en: {ruta_imagen_temporal}")
+            return ruta_imagen_temporal
+        except Exception as e:
+            raise RuntimeError(f"Error en el proceso de conversión y redimensión de imagen: {str(e)}")
+        
+    @staticmethod
+    def imprimir_imagen(ruta_imagen, nombre_impresora):
+        """
+        Imprime un archivo de imagen, convirtiéndolo a monocromo y FORZANDO
+        el escalado para que ocupe toda la etiqueta física.
+        """
+        print(f"Imprimiendo imagen '{ruta_imagen}' en '{nombre_impresora}' con escalado forzado (StretchBlt)...")
+        hDC = None
+        memDC = None
+        
+        try:
+            # --- PASO 1: ABRIR LA IMAGEN Y CONVERTIRLA A MONOCROMO (1-BIT) ---
+            img = Image.open(ruta_imagen)
+            img = img.convert('1')
+            img_width, img_height = img.size
+
+            # --- PASO 2: PREPARAR LA IMPRESORA DE DESTINO ---
+            hDC = win32ui.CreateDC()
+            hDC.CreatePrinterDC(nombre_impresora)
+            printable_width = hDC.GetDeviceCaps(win32con.HORZRES)
+            printable_height = hDC.GetDeviceCaps(win32con.VERTRES)
+
+            # --- PASO 3: PREPARAR LA IMAGEN DE ORIGEN EN MEMORIA ---
+            memDC = hDC.CreateCompatibleDC()
+            saveBitMap = win32ui.CreateBitmap()
+            saveBitMap.CreateCompatibleBitmap(hDC, img_width, img_height)
+            memDC.SelectObject(saveBitMap)
+            
+            dib = ImageWin.Dib(img)
+            dib.draw(memDC.GetHandleOutput(), (0, 0, img_width, img_height))
+
+            # --- PASO 4: COPIAR Y ESTIRAR LA IMAGEN DESDE LA MEMORIA A LA IMPRESORA ---
+            hDC.StartDoc(ruta_imagen)
+            hDC.StartPage()
+            
+            # --- INICIO DE LA CORRECCIÓN SINTÁCTICA ---
+            # Se separan los argumentos de rectángulos en tuplas de (posición) y (tamaño)
+            hDC.StretchBlt(
+                (0, 0),                                     # Argumento 1: Posición de destino (x, y)
+                (printable_width, printable_height),        # Argumento 2: Tamaño de destino (ancho, alto)
+                memDC,                                      # Argumento 3: DC de origen
+                (0, 0),                                     # Argumento 4: Posición de origen (x, y)
+                (img_width, img_height),                    # Argumento 5: Tamaño de origen (ancho, alto)
+                win32con.SRCCOPY                            # Argumento 6: Operación
+            )
+            # --- FIN DE LA CORRECCIÓN SINTÁCTICA ---
+            
+            hDC.EndPage()
+            hDC.EndDoc()
+            
+            print("Imagen escalada y enviada a la impresora con éxito.")
+            return True
+
+        except pywin_error as e:
+            raise RuntimeError(f"Error de la API de Windows al imprimir: {e}")
+        except Exception as e:
+            raise RuntimeError(f"Error inesperado al imprimir imagen: {e}")
+        finally:
+            # Limpiar todos los objetos de la API de Windows
+            if 'saveBitMap' in locals() and saveBitMap.GetHandle() != 0:
+                win32gui.DeleteObject(saveBitMap.GetHandle())
+            if memDC:
+                memDC.DeleteDC()
+            if hDC:
+                hDC.DeleteDC()
         return exito
