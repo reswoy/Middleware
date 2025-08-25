@@ -6,7 +6,7 @@ Punto de entrada principal de la aplicación.
 """
 
 from app import crear_app
-from config import obtener_ip_local, PORT
+from config import obtener_ip_local, PORT, API_KEY
 from impresoraConf import obtener_impresora_actual
 from utils.wkhtml_check import ensure_wkhtml_installed  # <-- verificación/instalación wkhtmltopdf
 
@@ -36,6 +36,10 @@ if __name__ == '__main__':
     print(f"🌐 Servidor iniciando en: http://{ip_local}:{PORT}")
     print(f"📍 IP local detectada: {ip_local}")
     print(f"🖨️  Impresora configurada: '{impresora_actual}'")
+    if API_KEY:
+        print("🔒 Autenticación por API Key: ACTIVADA (cabecera X-API-KEY)")
+    else:
+        print("⚠️  Autenticación por API Key: DESACTIVADA (definir API_KEY en .env)")
     print("📡 Para detener el servidor, presiona CTRL+C")
     
     # Se inicia el servidor Flask.

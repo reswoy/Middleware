@@ -70,6 +70,8 @@ Thumbs.db
 instance/
 .webassets-cache
 
+.env
+
 # Logs
 *.log
 

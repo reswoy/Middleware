@@ -11,14 +11,233 @@ middleware/
 ├── config.py              # Configuración centralizada
 ├── requirements.txt       # Dependencias del proyecto
 ├── routes/
+### Resumen
+
+Estas instrucciones cubren la preparación mínima en Windows para que el middleware funcione en varias máquinas locales. Las dependencias nativas requeridas por el proyecto son:
+
+# Middleware de Impresión - Windows
+
+Este middleware recibe archivos (PDF y TXT) por HTTP y los envía a una impresora en Windows.
+
+## Estructura del proyecto
+
+```
+Middleware/
+├── middleware.py           # Punto de entrada (arranca la app y verifica wkhtml)
+├── app.py                  # Factory Flask
+├── config.py               # Configuración y utilidades (detección de IP, rutas, timeouts)
+├── impresoraConf.py       # Obtener/guardar impresora predeterminada
+├── requirements.txt        # Dependencias Python
+├── routes/
 │   ├── __init__.py
-│   └── main.py           # Rutas/endpoints de la API
+│   └── main.py             # Endpoints: /, /print-pdf, /print/label, /printers, /impresora/predeterminada
 ├── services/
 │   ├── __init__.py
-│   └── print_service.py  # Lógica de impresión
+│   └── print_service.py    # Lógica de impresión (SumatraPDF, PowerShell, imgkit, WeasyPrint)
+├── templates/
+│   └── label.html          # Plantilla para etiquetas
+├── utils/
+│   ├── validation.py      # Validaciones de payload y sistema
+│   └── wkhtml_check.py    # Verifica/encuentra wkhtmltoimage y configura imgkit
+└── test_upload.ps1         # Script PowerShell para pruebas
+```
+
+---
+
+## Requisitos mínimos (Windows)
+
+- Windows 10/11 (64-bit recomendado)
+- Python 3.7+
+- PowerShell 5.1+
+- SumatraPDF (para impresión de PDFs)
+- wkhtmltoimage / wkhtmltopdf (para imgkit -> render HTML->imagen)
+- MSYS2 (si usas WeasyPrint; instala cairo/pango/glib/gdk-pixbuf)
+
+> Nota: Algunos paquetes Python (WeasyPrint, imgkit) requieren bibliotecas nativas que no se instalan por pip. Sigue la sección de instalación para los pasos nativos.
+
+---
+
+## Instalación (resumen rápido)
+
+1. Clonar el repositorio:
+
+```powershell
+git clone https://github.com/Facudominguezz/Middleware.git
+cd Middleware
+```
+
+2. Crear y activar entorno virtual:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+```
+
+3. Instalar dependencias Python:
+
+```powershell
+pip install -r requirements.txt
+```
+
+4. Instalar SumatraPDF (recomendado via winget):
+
+```powershell
+winget install SumatraPDF.SumatraPDF
+```
+
+5. Instalar wkhtmltoimage / wkhtmltopdf (para imgkit):
+- Descargar el binario para Windows (64-bit si tu Python es 64-bit) desde la web oficial y añadir la carpeta con `wkhtmltoimage.exe` al PATH.
+- (Alternativa) `choco install wkhtmltopdf -y` si usas Chocolatey.
+
+6. (Sólo si usas WeasyPrint) Instalar MSYS2 y paquetes nativos:
+- Instala MSYS2 desde https://www.msys2.org/
+- En "MSYS2 MinGW 64-bit":
+
+```bash
+pacman -Syu
+# cerrar y reabrir la shell si se solicita
+pacman -Su
+pacman -S --needed mingw-w64-x86_64-cairo mingw-w64-x86_64-pango mingw-w64-x86_64-gdk-pixbuf2 mingw-w64-x86_64-glib2 mingw-w64-x86_64-fontconfig mingw-w64-x86_64-libjpeg-turbo
+```
+
+- Añade `C:\msys64\mingw64\bin` al PATH para que Python encuentre las DLLs.
+
+---
+
+## Endpoints principales
+
+- GET / -> Health check ("Middleware de impresión activo")
+- POST /print-pdf -> Recibe archivo (form field `file`) y lo imprime (soporta `.pdf` y `.txt`)
+- POST /print/label -> Recibe JSON con datos de etiqueta, genera imagen desde `label.html` y la imprime
+- GET /printers -> Lista impresoras detectadas en el sistema (usando WMI)
+- POST /impresora/predeterminada -> Establece la impresora predeterminada (JSON:{"nombre":"Nombre Impresora"})
+
+---
+
+## Flujo de impresión (resumen técnico)
+
+- Recepción de archivo en `/print-pdf`:
+   - Se valida el archivo con `utils.validation`.
+   - Se guarda temporalmente en `tempfile.gettempdir()`.
+   - Si es `.txt` se envía con PowerShell (`Get-Content | Out-Printer`).
+   - Si es `.pdf` se intenta imprimir con SumatraPDF (rutas configuradas en `config.py`).
+   - Si falla, se intenta un respaldo usando `win32api.ShellExecute('print', ...)`.
+   - El archivo temporal se programa para eliminación en segundo plano (timeout configurable).
+
+- Etiquetas (`/print/label`):
+   - Genera códigos de barras en memoria (PIL + python-barcode).
+   - Renderiza `label.html` con `render_template` y luego usa `imgkit` para crear la imagen.
+   - Redimensiona la imagen a las dimensiones de la etiqueta y la envía a la impresora.
+
+---
+
+## Comprobaciones útiles
+
+- Verificar wkhtmltoimage:
+
+```powershell
+wkhtmltoimage --version
+```
+
+- Verificar que Python detecta `gobject` (tras instalar MSYS2 y añadir al PATH):
+
+```powershell
+python -c "from ctypes.util import find_library; print('gobject:', find_library('gobject-2.0'))"
+```
+
+- Ejecutar el middleware:
+
+```powershell
+.venv\Scripts\Activate.ps1
+python middleware.py
+```
+
+Al iniciarse, `middleware.py` llama a `utils.wkhtml_check.ensure_wkhtml_installed()` y muestra rutas detectadas para `wkhtmltoimage`/`wkhtmltopdf`.
+
+---
+
+## Notas y recomendaciones
+
+- Asegúrate de que la arquitectura (32/64-bit) de las dependencias nativas coincida con tu Python.
+- SumatraPDF debe estar instalado y accesible desde alguna de las rutas listadas en `config.RUTAS_SUMATRA` o en el PATH.
+- MSYS2 es la forma recomendada para instalar las librerías nativas necesarias por WeasyPrint en Windows; su instalación requiere interacción del usuario.
+- El proyecto ya incluye comprobación/ayuda para `wkhtmltoimage` pero no instala automáticamente MSYS2 ni SumatraPDF por seguridad.
+
+---
+
+Si quieres, puedo:
+- Añadir un script `setup_windows.ps1` que automatice la creación del `.venv`, `pip install -r requirements.txt` y verifique `wkhtmltoimage` y `SumatraPDF`.
+- Añadir una sección de troubleshooting más detallada (logs comunes y soluciones).
+
+Dime cuál prefieres y lo implemento.
+```powershell
+pip install -r requirements.txt
+
+Deberías obtener una ruta o el nombre de la DLL; si devuelve `None` o vacío, revisa que `C:\msys64\mingw64\bin` esté en el PATH y que la arquitectura (32/64 bit) coincida con tu Python.
+
+Luego prueba ejecutar el middleware:
+
+```powershell
+```
+
+### 4. Instalar SumatraPDF (necesario para imprimir PDFs)
+
+Si ves errores relacionados con `gobject-2.0` o `cairo`, revisa los pasos anteriores (MSYS2 y PATH).
+
+---
+
+Si quieres, puedo añadir un script `setup_windows.ps1` automatizado que:
+
+1. Cree y active el entorno `.venv` (no puede activar automáticamente en la sesión del usuario desde un script sin interacción),
+2. Instale dependencias pip,
+3. Compruebe `wkhtmltoimage` y muestre pasos para instalar MSYS2 y añadir al PATH (la instalación de MSYS2 requiere interacción manual y reinicio por seguridad).
+
+Dime si quieres que lo genere y lo añado al repo.
+```powershell
+winget install SumatraPDF.SumatraPDF
+```
+
+## ⚙️ Configuración
+
+### 1. Configurar la impresora
+
+Edita el archivo `config.py` y cambia el nombre de la impresora:
+
+```python
+# Cambiar por el nombre exacto de tu impresora en Windows
+PRINTER_NAME = "Brother PT-P950NW"  # ← Cambiar aquí
+```
+
+Para encontrar el nombre exacto de tu impresora:
+```powershell
+Get-WmiObject -Class Win32_Printer | Select-Object Name
+```
+
+### 2. Verificar que la impresora funciona
+
+Prueba imprimir un documento desde cualquier aplicación para asegurarte de que la impresora esté correctamente configurada.
+
+# Middleware de Impresión - Windows
+
+Este middleware permite recibir archivos PDF y TXT a través de HTTP y enviarlos directamente a una impresora en Windows.
+
+## 📁 Estructura del Proyecto
+
+```
+middleware/
+├── middleware.py           # Punto de entrada principal
+├── app.py                 # Factory de aplicación Flask
+├── config.py              # Configuración centralizada
+├── requirements.txt       # Dependencias del proyecto
+├── routes/
+│   ├── __init__.py
+│   └── main.py            # Rutas/endpoints de la API
+├── services/
+│   ├── __init__.py
+│   └── print_service.py   # Lógica de impresión
 └── utils/
-    ├── __init__.py
-    └── validation.py     # Utilidades de validación
+   ├── __init__.py
+   └── validation.py      # Utilidades de validación
 ```
 
 ## 📝 Nota sobre IPs en ejemplos
@@ -37,27 +256,138 @@ En este documento verás referencias como:
 
 ## 🚀 Instalación
 
+Estas instrucciones cubren la preparación mínima en Windows para que el middleware funcione en varias máquinas locales. Las dependencias nativas requeridas por el proyecto son:
+
+- SumatraPDF (para renderizar/imprimir PDFs)
+- wkhtmltoimage / wkhtmltopdf (usado por imgkit para generar imágenes/HTML -> imagen)
+- MSYS2 (para instalar dependencias nativas que requiere WeasyPrint: cairo, pango, glib, gdk-pixbuf, etc.)
+
+Sigue los pasos a continuación en cada máquina destino.
+
 ### 1. Clonar el repositorio
-```bash
+
+```powershell
 git clone https://github.com/Facudominguezz/Middleware.git
 cd Middleware
 ```
 
-### 2. Crear entorno virtual de Python
+### 2. Crear y activar un entorno virtual de Python
+
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 ```
 
 ### 3. Instalar dependencias de Python
+
 ```powershell
 pip install -r requirements.txt
 ```
 
-### 4. Instalar SumatraPDF (necesario para imprimir PDFs)
+> Nota: `WeasyPrint` y `imgkit` dependen de librerías nativas que no se instalan por pip. Los pasos siguientes instalan esas dependencias nativas.
+
+### 4. Instalar SumatraPDF (requerido para imprimir PDFs)
+
+Opción recomendada: usar winget si está disponible:
+
 ```powershell
 winget install SumatraPDF.SumatraPDF
 ```
+
+Si no tienes winget, descarga e instala SumatraPDF manualmente desde la página oficial y asegúrate de que la instalación agregue el ejecutable (`SumatraPDF.exe`) en el PATH o recuerda la ruta completa.
+
+### 5. Instalar wkhtmltoimage / wkhtmltopdf (para imgkit)
+
+imgkit usa wkhtmltoimage para convertir HTML a imagen. Instálalo así:
+
+Opción A — Descarga manual (recomendado):
+
+1. Ve a la página de descargas oficiales de wkhtmltopdf/wkhtmltoimage y descarga el instalador/precompilado para Windows (elige 64-bit si tu Python es 64-bit).
+2. Ejecuta el instalador o extrae el zip y copia el binario `wkhtmltoimage.exe` a una carpeta accesible.
+3. Añade la carpeta que contiene `wkhtmltoimage.exe` al PATH de Windows (o colócala junto al ejecutable del proyecto).
+
+Opción B — Chocolatey (si lo usas):
+
+```powershell
+# Requiere Chocolatey
+choco install wkhtmltopdf -y
+```
+
+> Verifica la instalación:
+
+```powershell
+wkhtmltoimage --version
+```
+
+### 6. Instalar MSYS2 y dependencias nativas para WeasyPrint
+
+WeasyPrint necesita librerías nativas (cairo, pango, glib, gdk-pixbuf, fontconfig). La forma más fiable en Windows es usar MSYS2 y su gestor `pacman`.
+
+1. Descarga e instala MSYS2 desde https://www.msys2.org/ (elige el instalador oficial). Sigue las instrucciones de la web para la instalación inicial.
+
+2. Abre la terminal "MSYS2 MinGW 64-bit" (para sistemas 64-bit) y actualiza el sistema:
+
+```bash
+# Dentro de MSYS2 (MinGW 64-bit)
+pacman -Syu
+# Si la actualización pide reiniciar la shell, ciérrala y vuelve a abrir "MSYS2 MinGW 64-bit"
+pacman -Su
+```
+
+3. Instala las librerías que necesita WeasyPrint (mingw-w64 para 64-bit):
+
+```bash
+pacman -S --needed mingw-w64-x86_64-cairo mingw-w64-x86_64-pango mingw-w64-x86_64-gdk-pixbuf2 mingw-w64-x86_64-glib2 mingw-w64-x86_64-fontconfig mingw-w64-x86_64-libjpeg-turbo
+```
+
+4. Añade la carpeta `mingw64\bin` de MSYS2 al PATH de Windows para que Python pueda cargar las DLLs (hazlo con cuidado para no truncar el PATH):
+
+Opciones para agregar al PATH:
+
+- Manual (recomendado): Panel de Control → Sistema → Configuración avanzada del sistema → Variables de entorno → editar `Path` → Añadir `C:\msys64\mingw64\bin`.
+- Temporal (solo sesión actual de PowerShell):
+
+```powershell
+$env:PATH += ";C:\msys64\mingw64\bin"
+```
+
+- Persistente desde PowerShell (usa con precaución; se concatena la variable actual):
+
+```powershell
+setx PATH "$($env:PATH);C:\msys64\mingw64\bin"
+```
+
+> Reinicia la terminal (o VS Code) después de actualizar el PATH para que los cambios surtan efecto.
+
+### 7. Verificaciones finales
+
+Con el entorno virtual activado y el PATH actualizado, prueba desde Python que las librerías nativas son detectables:
+
+```powershell
+# En PowerShell con .venv activado
+python -c "from ctypes.util import find_library; print('gobject:', find_library('gobject-2.0'))"
+```
+
+Deberías obtener una ruta o el nombre de la DLL; si devuelve `None` o vacío, revisa que `C:\msys64\mingw64\bin` esté en el PATH y que la arquitectura (32/64 bit) coincida con tu Python.
+
+Luego prueba ejecutar el middleware:
+
+```powershell
+.venv\Scripts\Activate.ps1
+python middleware.py
+```
+
+Si ves errores relacionados con `gobject-2.0` o `cairo`, revisa los pasos anteriores (MSYS2 y PATH).
+
+---
+
+Si quieres, puedo añadir un script `setup_windows.ps1` automatizado que:
+
+1. Cree y active el entorno `.venv` (no puede activar automáticamente en la sesión del usuario desde un script sin interacción),
+2. Instale dependencias pip,
+3. Compruebe `wkhtmltoimage` y muestre pasos para instalar MSYS2 y añadir al PATH (la instalación de MSYS2 requiere interacción manual y reinicio por seguridad).
+
+Dime si quieres que lo genere y lo añado al repo.
 
 ## ⚙️ Configuración
 
@@ -103,312 +433,5 @@ Cuando inicias el middleware verás algo como:
 📡 Servidor accesible solo desde la red local
 ```
 
-**¿Cómo funciona?**
-- El código detecta automáticamente tu IP local usando una conexión de prueba
-- Solo acepta conexiones desde esa IP específica
-- Es más seguro que `0.0.0.0` (que acepta desde cualquier IP)
-- Se actualiza automáticamente si cambias de red
-
-### Encontrar tu IP actual:
-
-Si necesitas saber tu IP actual para usarla desde otra computadora:
-
-```powershell
-# Ver la IP que está usando el middleware
-# (aparece al iniciar el servidor)
-
-# O verificar manualmente:
-ipconfig | findstr "IPv4"
-```
-
-### Configuraciones alternativas de IP:
-
-Si necesitas cambiar el comportamiento, puedes modificar `middleware.py`:
-
-```python
-# Detección automática (configuración actual)
-local_ip = get_local_ip()
-app.run(host=local_ip, port=5000, debug=True)
-
-# Solo localhost (máxima seguridad)
-app.run(host='127.0.0.1', port=5000, debug=True)
-
-# IP específica manual
-app.run(host='tu-ip-local', port=5000, debug=True)
-
-# Cualquier IP (menos seguro)
+... (el resto del README permanece igual)
 app.run(host='0.0.0.0', port=5000, debug=True)
-```
-
-### Verificar que funciona
-
-```powershell
-# Probar endpoint de salud (usar tu IP local)
-Invoke-RestMethod -Uri "http://tu-ip-local:5000/" -Method GET
-```
-
-Debería responder: `"Middleware de impresión activo"`
-
-## 📤 Enviar archivos para imprimir
-
-### Opción 1: Usar el script de PowerShell incluido
-
-```powershell
-# El script detecta automáticamente la IP del servidor
-PowerShell -ExecutionPolicy Bypass -File "test_upload.ps1"
-
-# O especificar manualmente (si sabes la IP)
-PowerShell -ExecutionPolicy Bypass -File "test_upload.ps1" -FilePath "archivo.pdf" -ServerUrl "http://tu-ip-local:5000/print-pdf"
-```
-
-**💡 Tip**: El script usa la IP por defecto del servidor. La IP se detecta automáticamente al iniciar el middleware.
-
-**📝 Personalizar el script**: Si necesitas cambiar la IP por defecto en `test_upload.ps1`, edita la línea:
-```powershell
-[string]$ServerUrl = "http://tu-ip-local:5000/print-pdf"  # Cambiar por tu IP actual
-```
-
-### Opción 2: Usar curl (si está disponible)
-
-```bash
-curl -X POST -F "file=@archivo.pdf" http://tu-ip-local:5000/print-pdf
-```
-
-### Opción 3: Usar PowerShell manualmente
-
-Para PowerShell 7+ (PowerShell Core):
-```powershell
-$response = Invoke-WebRequest -Uri "http://190.193.235.6:5000/print-pdf" -Method POST -Form @{
-    file = Get-Item "C:\ruta\archivo.pdf"
-}
-Write-Host $response.Content
-```
-
-## 📁 Tipos de archivo soportados
-
-| Extensión | Método de impresión | Descripción | Notas |
-|-----------|-------------------|-------------|-------|
-| `.pdf` | SumatraPDF | Documentos PDF | Requiere SumatraPDF instalado |
-| `.txt` | Out-Printer directo | Archivos de texto plano | Envío directo sin procesamiento |
-
-**Importante**: 
-- Los archivos **PDF** se procesan a través de SumatraPDF para convertirlos a formato de impresión
-- Los archivos **TXT** se envían tal como están a la impresora (si es compatible)
-
-## ❌ Formatos NO soportados
-
-### ZPL (Zebra Programming Language)
-
-**Los archivos ZPL NO son compatibles** con la impresora Brother PT-P950NW por las siguientes razones:
-
-1. **Incompatibilidad de lenguajes de comando:**
-   - **ZPL** es un lenguaje de programación específico para impresoras **Zebra**
-   - **Brother PT-P950NW** utiliza el lenguaje de comandos **P-touch Template** y **Brother Command**
-   - Son protocolos completamente diferentes e incompatibles
-
-2. **Evidencia técnica:**
-   ```powershell
-   # Prueba realizada durante desarrollo:
-   PS C:\> Get-Content "test_label.zpl" | Out-Printer -Name "Brother PT-P950NW"
-   
-   # Resultado:
-   out-lineoutput : La longitud no puede ser inferior a cero.
-   Nombre del parámetro: length
-   ```
-
-3. **Documentación oficial:**
-   - **Brother PT-P950NW**: Impresora de etiquetas que utiliza tecnología P-touch
-   - **Formatos soportados por Brother**: .lbx, .lbz (P-touch Template), comandos ESC/P
-   - **ZPL**: Exclusivo para impresoras Zebra (ZT, ZD, GK, GX series)
-
-4. **Alternativas recomendadas:**
-   - Usar **Brother P-touch Editor** para crear etiquetas
-   - Convertir diseños a **PDF** antes de imprimir
-   - Utilizar **comandos Brother** específicos si se requiere programación directa
-
-**Fuentes:**
-- [Brother PT-P950NW Manual](https://support.brother.com/g/b/manualtop.aspx?c=us&lang=en&prod=lp950nwus)
-- [Zebra ZPL Documentation](https://www.zebra.com/us/en/support-downloads/knowledge-articles/zpl-programming-guide.html)
-- Pruebas técnicas realizadas durante el desarrollo de este middleware
-
-## 🔧 Solución de problemas
-
-### Error: "No se encuentra ningún parámetro que coincida con el nombre del parámetro 'Form'"
-
-**Causa**: Estás usando PowerShell 5.1 (Windows PowerShell)  
-**Solución**: Usa el script `test_upload.ps1` incluido en el proyecto
-
-### Error: "Uno de los dispositivos conectados al sistema no funciona"
-
-**Causa**: Problema con la configuración de la impresora  
-**Soluciones**:
-1. Verificar que la impresora esté encendida y conectada
-2. Verificar el nombre exacto de la impresora:
-   ```powershell
-   Get-WmiObject -Class Win32_Printer | Where-Object {$_.WorkOffline -eq $false} | Select-Object Name, PrinterStatus
-   ```
-3. Actualizar el `PRINTER_NAME` en `middleware.py`
-
-### Error: "SumatraPDF no encontrado"
-
-**Causa**: SumatraPDF no está instalado  
-**Solución**:
-```powershell
-winget install SumatraPDF.SumatraPDF
-```
-
-### El archivo se abre pero no se imprime
-
-**Causa**: Configuración de aplicación predeterminada  
-**Solución**: El middleware debería usar SumatraPDF automáticamente. Si el problema persiste, verificar la instalación de SumatraPDF.
-
-### Los archivos ZPL no se imprimen correctamente
-
-**Respuesta**: **Los archivos ZPL NO son compatibles** con la impresora Brother PT-P950NW.
-
-**Razón técnica**: ZPL (Zebra Programming Language) es un lenguaje específico para impresoras Zebra. La Brother PT-P950NW utiliza comandos P-touch Template completamente diferentes.
-
-**Soluciones alternativas**:
-1. Convertir el diseño de etiqueta a PDF usando herramientas de diseño
-2. Usar Brother P-touch Editor para crear etiquetas nativas
-3. Utilizar una impresora Zebra si se requiere soporte ZPL nativo
-
-**Prueba técnica realizada**:
-```powershell
-Get-Content "archivo.zpl" | Out-Printer -Name "Brother PT-P950NW"
-# Error: La longitud no puede ser inferior a cero
-```
-
-## 🌐 Configuración de red
-
-### Para uso local (configuración actual)
-
-El servidor detecta automáticamente tu IP local y solo acepta conexiones desde la red local. Esto es seguro y recomendado para uso interno.
-
-### Para uso desde internet (Odoo, sistemas externos)
-
-Si necesitas que Odoo u otros sistemas externos accedan al middleware desde internet, tienes estas opciones:
-
-#### **Opción 1: Cambiar a todas las interfaces**
-Modifica `middleware.py`:
-```python
-# Cambiar esta línea:
-app.run(host=local_ip, port=5000, debug=True)
-
-# Por esta:
-app.run(host='0.0.0.0', port=5000, debug=True)
-```
-
-Luego configura **port forwarding** en tu router:
-- Puerto externo: 5000 → IP interna: tu-ip-local:5000
-- Odoo podrá enviar archivos a: `http://tu-ip-publica:5000/print-pdf`
-
-#### **Opción 2: Usar túnel seguro (recomendado)**
-```powershell
-# Instalar ngrok
-winget install ngrok.ngrok
-
-# Crear túnel (requiere cuenta gratuita)
-ngrok http 5000
-```
-
-Ngrok te dará una URL pública temporal como: `https://abc123.ngrok.io`
-Odoo puede usar: `https://abc123.ngrok.io/print-pdf`
-
-#### **⚠️ Consideraciones de seguridad para internet:**
-
-Si expones el middleware a internet, considera agregar:
-
-1. **Autenticación por token**:
-```python
-@app.before_request
-def check_auth():
-    token = request.headers.get('Authorization')
-    if token != 'Bearer tu-token-secreto':
-        return Response('No autorizado', status=401)
-```
-
-2. **Rate limiting** para evitar spam
-
-3. **HTTPS** en lugar de HTTP
-
-4. **Validación de archivos** más estricta
-
-### Permitir conexiones externas
-
-El servidor por defecto está configurado para IP local específica. Para cambiar el comportamiento:
-
-```python
-# IP local específica (configuración actual)
-local_ip = get_local_ip()
-app.run(host=local_ip, port=5000, debug=True)
-
-# Solo localhost (máxima seguridad)
-app.run(host='127.0.0.1', port=5000, debug=True)
-
-# Todas las interfaces (para acceso desde internet)
-app.run(host='0.0.0.0', port=5000, debug=True)
-```
-### Firewall de Windows
-
-Si necesitas acceso desde otras computadoras:
-
-```powershell
-# Permitir el puerto 5000
-New-NetFirewallRule -DisplayName "Middleware Impresión" -Direction Inbound -Protocol TCP -LocalPort 5000 -Action Allow
-```
-
-## 📋 API Reference
-
-### GET /
-**Descripción**: Endpoint de salud  
-**Respuesta**: `"Middleware de impresión activo"`
-
-### POST /print-pdf
-**Descripción**: Enviar archivo para imprimir  
-**Parámetros**:
-- `file`: Archivo a imprimir (PDF, ZPL, TXT)
-
-**Respuestas**:
-- `200`: Archivo enviado correctamente
-- `400`: Error en la solicitud (archivo faltante, SO no compatible)
-- `415`: Tipo de archivo no soportado
-- `500`: Error interno del servidor
-
-**Ejemplo de respuesta exitosa**:
-```
-Archivo enviado a impresión
-```
-
-## 🔄 Desarrollo
-
-### Modo debug
-
-El servidor incluye modo debug por defecto. Para producción:
-
-```python
-app.run(host='0.0.0.0', port=5000, debug=False)
-```
-
-### Logs
-
-Los logs aparecen en la consola donde se ejecuta el servidor. Para más detalle, verificar las salidas `print()` en el código.
-
-## 📝 Notas adicionales
-
-- Los archivos temporales se eliminan automáticamente después de 5 segundos
-- El middleware está optimizado para Windows únicamente
-- Se recomienda usar en redes locales por seguridad
-
-## 🆘 Soporte
-
-Si encuentras problemas:
-
-1. Verificar que todos los requisitos estén instalados
-2. Comprobar los logs del servidor
-3. Probar imprimir manualmente desde Windows
-4. Verificar conectividad de red si usas IPs remotas
-
----
-
-**Desarrollado para Windows - Probado con Brother PT-P950NW**

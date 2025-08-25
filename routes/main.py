@@ -12,6 +12,7 @@ from impresoraConf import obtener_impresora_actual
 from impresoraConf import establecer_impresora_actual
 from services import PrintService
 from utils import ValidationUtils
+from utils.auth import require_api_key
 
 
 # Crear blueprint para las rutas principales
@@ -19,6 +20,7 @@ main_bp = Blueprint('main', __name__)
 
 # --- NUEVO ENDPOINT DE IMPRESIÓN DE ETIQUETAS ---
 @main_bp.route('/print/label', methods=['POST'])
+@require_api_key
 def imprimir_etiqueta_api():
     ruta_temporal = None
     try:
@@ -76,6 +78,7 @@ def estado_salud():
 ## --------  METODO DE GET NUEVO GABRIEL LUJAN--------##
 
 @main_bp.route('/printers', methods=['GET'])
+@require_api_key
 def listar_impresoras():
     """
     Endpoint que devuelve una lista de las impresoras activas
@@ -97,6 +100,7 @@ def listar_impresoras():
 
 
 @main_bp.route('/impresora/predeterminada', methods=['POST'])
+@require_api_key
 def establecer_predeterminada():
     """
     Endpoint para establecer una impresora como predeterminada.
@@ -127,6 +131,7 @@ def establecer_predeterminada():
 
 
 @main_bp.route('/print-pdf', methods=['POST'])
+@require_api_key
 def imprimir_pdf():
     """
     Endpoint principal que recibe un archivo y lo manda a imprimir.
