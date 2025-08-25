@@ -7,13 +7,21 @@ Contiene todas las constantes y configuraciones centralizadas.
 
 import socket
 import os
+from pathlib import Path
+from dotenv import dotenv_values
 
 # --- CONFIGURACIÓN PRINCIPAL ---
 # IMPORTANTE: Aquí debes poner el nombre exacto de tu impresora como aparece en Windows.
 # Puedes encontrarlo en "Dispositivos e impresoras" o ejecutando en PowerShell: Get-Printer
 
 NOMBRE_ARCHIVO_GUARDADO = "impresora_guardada.txt"
-API_KEYS = os.getenv("RELEX_API_KEYS", "b4Xrjpa36vhNBfZpoJuD5XtyuSQqXmxA").split(",")
+
+# Cargar variables desde .env ubicado junto a este archivo (o usar variables de entorno)
+_BASE_DIR = Path(__file__).resolve().parent
+_DOTENV_PATH = _BASE_DIR / ".env"
+_DOTENV = dotenv_values(str(_DOTENV_PATH)) if _DOTENV_PATH.exists() else {}
+# Prioridad: variable de entorno > .env > vacío
+API_KEY = (os.getenv("API_KEY") or _DOTENV.get("API_KEY", "")).strip()
 
 
 # Configuración del servidor

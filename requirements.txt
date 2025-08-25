@@ -5,3 +5,5 @@ WMI==1.5.1
 imgkit==1.2.3
 python-barcode==0.15.1
 Pillow==10.4.0
+WeasyPrint>=62.0
+python-dotenv>=1.0.1

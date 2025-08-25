@@ -1,7 +1,9 @@
 # Script para enviar archivo PDF al middleware usando PowerShell 5.1
 param(
     # Ruta del archivo PDF a enviar
-    [string]$FilePath = "C:\Users\facu_\Downloads\Etiqueta (11).pdf"
+    [string]$FilePath = "C:\Users\facu_\Downloads\Etiqueta (11).pdf",
+    # API Key a enviar en la cabecera X-API-KEY (opcional)
+    [string]$ApiKey
 )
 
 # Detectar la IP pública automáticamente
@@ -14,6 +16,19 @@ try {
     $publicIp = "localhost"
 }
 $ServerUrl = "http://${publicIp}:5000/print-pdf"
+
+# Intentar cargar API_KEY desde .env si no se pasó por parámetro
+if (-not $ApiKey) {
+    $dotenvPath = Join-Path -Path (Get-Location) -ChildPath ".env"
+    if (Test-Path $dotenvPath) {
+        try {
+            $envLines = Get-Content -Path $dotenvPath | Where-Object { $_ -match "^\s*API_KEY\s*=\s*.+" }
+            if ($envLines) {
+                $ApiKey = ($envLines -split "=",2)[1].Trim().Trim('"')
+            }
+        } catch {}
+    }
+}
 
 # Verificar que el archivo existe
 if (-not (Test-Path $FilePath)) {
@@ -43,6 +58,12 @@ try {
     Write-Host "Enviando archivo: $fileName"
     Write-Host "A servidor: $ServerUrl"
     
+    # Cabecera X-API-KEY si existe
+    if ($ApiKey) {
+        $httpClient.DefaultRequestHeaders.Remove("X-API-KEY") | Out-Null
+        $httpClient.DefaultRequestHeaders.Add("X-API-KEY", $ApiKey)
+    }
+
     $response = $httpClient.PostAsync($ServerUrl, $content).Result
     $responseContent = $response.Content.ReadAsStringAsync().Result
     
