@@ -26,8 +26,7 @@ import win32print
 import win32ui
 from pywintypes import error as pywin_error
 import win32con
-import win32gui 
-from weasyprint import HTML
+import win32gui
 
 from flask import render_template
 from impresoraConf import obtener_impresora_actual
@@ -80,21 +79,6 @@ class PrintService:
             raise RuntimeError(f"Error al generar código de barras: {str(e)}")
 
         return barcodes
-
-    @staticmethod
-    def convertir_html_a_pdf(html_string):
-        """Convierte un string HTML a un archivo PDF temporal."""
-        try:
-            ruta_pdf_temporal = os.path.join(
-                tempfile.gettempdir(), 
-                f"label_generada_{uuid.uuid4().hex}.pdf"
-            )
-            # WeasyPrint crea el PDF a partir del string HTML
-            HTML(string=html_string).write_pdf(ruta_pdf_temporal)
-            print(f"PDF de etiqueta generado en: {ruta_pdf_temporal}")
-            return ruta_pdf_temporal
-        except Exception as e:
-            raise RuntimeError(f"Error al convertir HTML a PDF con WeasyPrint: {str(e)}")
 
     @staticmethod
     def imprimir_pdf_generico(ruta_pdf, nombre_impresora, ancho_mm, alto_mm):
