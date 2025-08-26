@@ -48,36 +48,22 @@ class PrintService:
     def generar_barcodes_base64(datos_producto):
         """Genera códigos de barras en memoria y los devuelve como strings Base64."""
         barcodes = {}
-
         try:
             if datos_producto.get('codigo_barras'):
-                
-                # --- INICIO DE LA CORRECCIÓN ---
-                # Las opciones de renderizado se mantienen en un diccionario.
                 writer_options = {
-                    'module_height': 7.0,
-                    'font_size': 8,
-                    'text_distance': 3.0,
-                    'quiet_zone': 2.0
+                    'module_height': 4.0,  # Altura de barra reducida para mejor balance
+                    'quiet_zone': 2.0,
+                    'write_text': False  # El HTML renderizará el texto
                 }
-                
-                # El ImageWriter se crea SIN opciones.
                 writer = ImageWriter()
-                # --- FIN DE LA CORRECCIÓN ---
-
                 ean = barcode.get_barcode_class('ean13')
                 commercial_barcode = ean(datos_producto['codigo_barras'], writer=writer) 
-                
                 buffer_commercial = io.BytesIO()
-                # --- CORRECCIÓN CLAVE: Pasamos las opciones aquí, en el método .write() ---
                 commercial_barcode.write(buffer_commercial, writer_options)
-                
                 b64_commercial = base64.b64encode(buffer_commercial.getvalue()).decode('utf-8')
                 barcodes['commercial_barcode_base64'] = b64_commercial
-
         except Exception as e:
             raise RuntimeError(f"Error al generar código de barras: {str(e)}")
-
         return barcodes
 
     @staticmethod
@@ -347,10 +333,27 @@ class PrintService:
         return exito
 
     @staticmethod
-    def convertir_html_a_imagen(html_string, ancho_mm, alto_mm):
+    def obtener_dpi_impresora(nombre_impresora):
         """
-        Convierte HTML a una imagen, permitiendo que la altura inicial sea variable,
-        y luego la redimensiona a las dimensiones exactas de la etiqueta.
+        Se conecta a una impresora y devuelve su resolución DPI.
+        """
+        try:
+            hDC = win32ui.CreateDC()
+            hDC.CreatePrinterDC(nombre_impresora)
+            dpi_x = hDC.GetDeviceCaps(win32con.LOGPIXELSX)
+            hDC.DeleteDC()
+            print(f"DPI detectado para '{nombre_impresora}': {dpi_x}")
+            return dpi_x
+        except Exception as e:
+            # Si falla la detección, usamos 203 como un valor seguro para etiquetas
+            print(f"ADVERTENCIA: No se pudo detectar el DPI. Usando valor por defecto (203). Error: {e}")
+            return 203
+
+    @staticmethod
+    def convertir_html_a_imagen(html_string, ancho_mm, alto_mm, nombre_impresora):
+        """
+        Convierte un HTML a imagen, usando ZOOM para escalar el contenido
+        y asegurar la proporción correcta del texto.
         """
         try:
             ruta_imagen_temporal = os.path.join(
@@ -358,102 +361,86 @@ class PrintService:
                 f"label_generada_{uuid.uuid4().hex}.png"
             )
 
-            dpi = 300
+            # Detectamos el DPI real de la impresora para el cálculo.
+            dpi = PrintService.obtener_dpi_impresora(nombre_impresora)
+            
+            # wkhtmltoimage renderiza el contenido a 96 DPI por defecto.
+            # Calculamos el factor de zoom necesario para escalar de 96 DPI al DPI de la impresora.
+            zoom_factor = dpi / 96.0
+
+            # Calculamos el tamaño del lienzo en píxeles usando el DPI de la impresora.
             pixel_width = int((ancho_mm / 25.4) * dpi)
             pixel_height = int((alto_mm / 25.4) * dpi)
 
-            print(f"Paso 1: Generando imagen fuente (alto variable)...")
+            print(f"Generando imagen de {pixel_width}x{pixel_height}px con un zoom de {zoom_factor:.2f}x (DPI detectado: {dpi})...")
             
-            # Opciones para generar la imagen inicial. Notar que quitamos height y crop.
             options = {
                 'width': pixel_width,
+                'height': pixel_height,
                 'disable-smart-width': '',
                 'encoding': "UTF-8",
+                'quality': 100,
+                # --- LA LÍNEA CLAVE QUE RESUELVE TODO (versión compatible) ---
+                'zoom': zoom_factor
             }
 
             config = get_imgkit_config()
-            # 1. Generar la imagen. Será tan alta como necesite el contenido.
             imgkit.from_string(html_string, ruta_imagen_temporal, options=options, config=config)
             
-            print(f"Paso 2: Redimensionando imagen a las dimensiones finales ({pixel_width}x{pixel_height} px)...")
-            
-            # 2. Abrir la imagen generada con Pillow
-            img = Image.open(ruta_imagen_temporal)
-            
-            # 3. Redimensionarla al tamaño exacto de la etiqueta usando un filtro de alta calidad
-            img_resized = img.resize((pixel_width, pixel_height), Image.Resampling.LANCZOS)
-            
-            # 4. Guardar la imagen ya redimensionada, sobreescribiendo la original
-            img_resized.save(ruta_imagen_temporal)
-
-            print(f"Imagen final generada y redimensionada en: {ruta_imagen_temporal}")
+            print(f"Imagen adaptativa generada en: {ruta_imagen_temporal}")
             return ruta_imagen_temporal
         except Exception as e:
-            raise RuntimeError(f"Error en el proceso de conversión y redimensión de imagen: {str(e)}")
+            raise RuntimeError(f"Error en el proceso de conversión de imagen adaptativa: {str(e)}")
         
     @staticmethod
     def imprimir_imagen(ruta_imagen, nombre_impresora):
         """
-        Imprime un archivo de imagen, convirtiéndolo a monocromo y FORZANDO
-        el escalado para que ocupe toda la etiqueta física.
+        Imprime una imagen, escalándola proporcionalmente y centrándola en el papel
+        para evitar distorsiones.
         """
-        print(f"Imprimiendo imagen '{ruta_imagen}' en '{nombre_impresora}' con escalado forzado (StretchBlt)...")
+        print(f"Imprimiendo imagen '{ruta_imagen}' en '{nombre_impresora}' con escalado proporcional...")
         hDC = None
         memDC = None
-        
         try:
-            # --- PASO 1: ABRIR LA IMAGEN Y CONVERTIRLA A MONOCROMO (1-BIT) ---
             img = Image.open(ruta_imagen)
-            img = img.convert('1')
             img_width, img_height = img.size
-
-            # --- PASO 2: PREPARAR LA IMPRESORA DE DESTINO ---
             hDC = win32ui.CreateDC()
             hDC.CreatePrinterDC(nombre_impresora)
             printable_width = hDC.GetDeviceCaps(win32con.HORZRES)
             printable_height = hDC.GetDeviceCaps(win32con.VERTRES)
-
-            # --- PASO 3: PREPARAR LA IMAGEN DE ORIGEN EN MEMORIA ---
+            scale_w = printable_width / img_width
+            scale_h = printable_height / img_height
+            scale = min(scale_w, scale_h)
+            dest_width = int(img_width * scale)
+            dest_height = int(img_height * scale)
+            dest_x = (printable_width - dest_width) // 2
+            dest_y = (printable_height - dest_height) // 2
+            print(f"Destino en papel: {dest_width}x{dest_height}px en la posición ({dest_x},{dest_y})")
             memDC = hDC.CreateCompatibleDC()
             saveBitMap = win32ui.CreateBitmap()
             saveBitMap.CreateCompatibleBitmap(hDC, img_width, img_height)
             memDC.SelectObject(saveBitMap)
-            
             dib = ImageWin.Dib(img)
             dib.draw(memDC.GetHandleOutput(), (0, 0, img_width, img_height))
-
-            # --- PASO 4: COPIAR Y ESTIRAR LA IMAGEN DESDE LA MEMORIA A LA IMPRESORA ---
             hDC.StartDoc(ruta_imagen)
             hDC.StartPage()
-            
-            # --- INICIO DE LA CORRECCIÓN SINTÁCTICA ---
-            # Se separan los argumentos de rectángulos en tuplas de (posición) y (tamaño)
             hDC.StretchBlt(
-                (0, 0),                                     # Argumento 1: Posición de destino (x, y)
-                (printable_width, printable_height),        # Argumento 2: Tamaño de destino (ancho, alto)
-                memDC,                                      # Argumento 3: DC de origen
-                (0, 0),                                     # Argumento 4: Posición de origen (x, y)
-                (img_width, img_height),                    # Argumento 5: Tamaño de origen (ancho, alto)
-                win32con.SRCCOPY                            # Argumento 6: Operación
+                (dest_x, dest_y), (dest_width, dest_height),
+                memDC, (0, 0), (img_width, img_height),
+                win32con.SRCCOPY
             )
-            # --- FIN DE LA CORRECCIÓN SINTÁCTICA ---
-            
             hDC.EndPage()
             hDC.EndDoc()
-            
-            print("Imagen escalada y enviada a la impresora con éxito.")
+            print("Imagen escalada proporcionalmente y enviada a la impresora.")
             return True
-
         except pywin_error as e:
             raise RuntimeError(f"Error de la API de Windows al imprimir: {e}")
         except Exception as e:
             raise RuntimeError(f"Error inesperado al imprimir imagen: {e}")
         finally:
-            # Limpiar todos los objetos de la API de Windows
             if 'saveBitMap' in locals() and saveBitMap.GetHandle() != 0:
                 win32gui.DeleteObject(saveBitMap.GetHandle())
             if memDC:
                 memDC.DeleteDC()
             if hDC:
                 hDC.DeleteDC()
-        return exito
