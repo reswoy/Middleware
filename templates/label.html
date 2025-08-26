@@ -2,60 +2,60 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Etiqueta para Redimensionar</title>
+    <title>Etiqueta Adaptativa</title>
     <style>
-        /* Ya no necesitamos la directiva @page */
-        html, body {
-            width: 100%;
-            height: auto; /* La altura crecerá según el contenido */
-            margin: 0;
-            padding: 0;
-            font-family: Arial, sans-serif;
-            background-color: white;
-            box-sizing: border-box;
-        }
+    /* Reseteo básico para eliminar márgenes y espaciados por defecto */
+    html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        box-sizing: border-box;
+        font-family: Arial, sans-serif;
+        background-color: white;
+        overflow: hidden;
+    }
 
-        .container {
-            width: 100%;
-            padding: 20px; /* Padding generoso en píxeles */
-            box-sizing: border-box;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 15px; /* Espacio generoso entre elementos */
-        }
-        
-        .text-content {
-            width: 100%;
-            text-align: center;
-        }
-        
-        p { margin: 3px 0; }
+    /* Contenedor principal que ocupa todo el espacio disponible */
+    .container {
+        width: 100%;
+        height: auto; /* Altura automática para ajustarse al contenido */
+        box-sizing: border-box;
+        padding: 5%; /* Un poco menos de padding para maximizar espacio */
 
-        /* Usamos fuentes grandes porque sabemos que luego se van a encoger */
-        .product-name {
-            font-weight: bold;
-            font-size: 20pt; 
-        }
-        
-        .details {
-            text-align: left;
-            font-size: 16pt;
-        }
-        
-        .barcode-content {
-            width: 100%;
-            text-align: center;
-        }
+        display: flex;
+        flex-direction: column;
+        justify-content: space-evenly; 
+        align-items: center;
+        text-align: center;
+    }
+    
+    /* --- TAMAÑOS BASADOS SIEMPRE EN EL ANCHO (VW) --- */
 
-        .barcode-content img {
-            max-width: 100%;
-        }
-        
-        .barcode-label {
-            font-size: 14pt;
-        }
-    </style>
+    .product-name {
+        font-weight: bold;
+        font-size: auto; /* Tamaño grande, basado en el ancho */
+    }
+    
+    .details {
+        text-align: left;
+        font-size: auto; /* Tamaño mediano, basado en el ancho */
+    }
+    
+    .barcode-content {
+        width: 90%;
+    }
+
+    .barcode-content img {
+        width: 100%;
+        height: auto;
+    }
+    
+    .barcode-label {
+        font-size: auto; /* Mismo tamaño que .details, basado en el ancho */
+        letter-spacing: 2px;
+    }
+</style>
 </head>
 <body>
     <div class="container">
@@ -69,7 +69,7 @@
         
         <div class="barcode-content">
             {% if commercial_barcode_base64 %}
-                <img src="data:image/png;base64,{{ commercial_barcode_base64 }}">
+                <img src="data:image/png;base64,{{ commercial_barcode_base64 }}" alt="Código de barras">
                 <p class="barcode-label">{{ datos_producto.codigo_barras }}</p>
             {% endif %}
         </div>
