@@ -28,6 +28,7 @@ from pywintypes import error as pywin_error
 import win32con
 import win32gui
 
+from barcode.writer import ImageWriter
 from flask import render_template
 from impresoraConf import obtener_impresora_actual
 from config import ( 
@@ -46,24 +47,31 @@ class PrintService:
     
     @staticmethod
     def generar_barcodes_base64(datos_producto):
-        """Genera códigos de barras en memoria y los devuelve como strings Base64."""
+        """Genera códigos de barras en memoria y los devuelve como strings Base64 de una imagen PNG."""
         barcodes = {}
         try:
             if datos_producto.get('codigo_barras'):
-                writer_options = {
-                    'module_height': 4.0,  # Altura de barra reducida para mejor balance
-                    'quiet_zone': 2.0,
-                    'write_text': False  # El HTML renderizará el texto
-                }
                 writer = ImageWriter()
                 ean = barcode.get_barcode_class('ean13')
+                
+                # --- INICIO DE LA CORRECCIÓN CLAVE ---
+                # Añadimos opciones para controlar el tamaño de la imagen generada
+                writer_options = {
+                    "write_text": False,
+                    "module_height": 5.0  # <-- VALOR CLAVE: Reduce la altura de las barras
+                }
+                # --- FIN DE LA CORRECCIÓN CLAVE ---
+
                 commercial_barcode = ean(datos_producto['codigo_barras'], writer=writer) 
+                
                 buffer_commercial = io.BytesIO()
+                # Pasamos las nuevas opciones al método write
                 commercial_barcode.write(buffer_commercial, writer_options)
+                
                 b64_commercial = base64.b64encode(buffer_commercial.getvalue()).decode('utf-8')
                 barcodes['commercial_barcode_base64'] = b64_commercial
         except Exception as e:
-            raise RuntimeError(f"Error al generar código de barras: {str(e)}")
+            raise RuntimeError(f"Error al generar código de barras PNG: {str(e)}")
         return barcodes
 
     @staticmethod
@@ -352,8 +360,8 @@ class PrintService:
     @staticmethod
     def convertir_html_a_imagen(html_string, ancho_mm, alto_mm, nombre_impresora):
         """
-        Convierte un HTML a imagen, usando ZOOM para escalar el contenido
-        y asegurar la proporción correcta del texto.
+        Convierte un HTML a imagen, usando un ZOOM DINÁMICO que se ajusta
+        al DPI de la impresora y al tamaño de la etiqueta.
         """
         try:
             ruta_imagen_temporal = os.path.join(
@@ -361,18 +369,29 @@ class PrintService:
                 f"label_generada_{uuid.uuid4().hex}.png"
             )
 
-            # Detectamos el DPI real de la impresora para el cálculo.
             dpi = PrintService.obtener_dpi_impresora(nombre_impresora)
             
-            # wkhtmltoimage renderiza el contenido a 96 DPI por defecto.
-            # Calculamos el factor de zoom necesario para escalar de 96 DPI al DPI de la impresora.
-            zoom_factor = dpi / 96.0
+            # --- INICIO DE LA LÓGICA DE ZOOM DINÁMICO ---
+            
+            # Definimos un ancho de etiqueta "ideal" o de referencia (en mm)
+            # para el cual nuestro diseño HTML con fuentes grandes se ve bien.
+            ANCHO_REFERENCIA_MM = 100.0 
+            
+            # Calculamos un factor de escala basado en el tamaño real de la etiqueta.
+            # Si la etiqueta es más pequeña que la referencia, este valor será < 1.
+            # Si es más grande, será > 1.
+            escala_por_tamano = ancho_mm / ANCHO_REFERENCIA_MM
 
-            # Calculamos el tamaño del lienzo en píxeles usando el DPI de la impresora.
+            # Calculamos el zoom final combinando la corrección de DPI y la escala por tamaño.
+            # Esto hace que el zoom se achique para etiquetas pequeñas y se agrande para las grandes.
+            zoom_factor = (dpi / 96.0) * escala_por_tamano
+            
+            # --- FIN DE LA LÓGICA DE ZOOM DINÁMICO ---
+
             pixel_width = int((ancho_mm / 25.4) * dpi)
             pixel_height = int((alto_mm / 25.4) * dpi)
 
-            print(f"Generando imagen de {pixel_width}x{pixel_height}px con un zoom de {zoom_factor:.2f}x (DPI detectado: {dpi})...")
+            print(f"Generando imagen de {pixel_width}x{pixel_height}px con un zoom DINÁMICO de {zoom_factor:.2f}x...")
             
             options = {
                 'width': pixel_width,
@@ -380,7 +399,6 @@ class PrintService:
                 'disable-smart-width': '',
                 'encoding': "UTF-8",
                 'quality': 100,
-                # --- LA LÍNEA CLAVE QUE RESUELVE TODO (versión compatible) ---
                 'zoom': zoom_factor
             }
 
