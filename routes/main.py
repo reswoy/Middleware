@@ -32,13 +32,30 @@ def imprimir_etiqueta_api():
         cantidad = datos['cantidad']
         nombre_impresora = obtener_impresora_actual()
 
-        barcodes_b64 = PrintService.generar_barcodes_base64(datos_producto)
-        contexto_renderizado = {**datos, **barcodes_b64}
-        html_string = render_template('label.html', **contexto_renderizado)
-
         ancho_mm = config_impresora['ancho_mm']
         alto_mm = config_impresora['alto_mm']
+
+        # --- INICIO DE LA LÓGICA INTELIGENTE ---
+        # Calculamos un tamaño de fuente base en puntos (pt)
+        # basado en la dimensión más pequeña de la etiqueta.
+        # El divisor (ej: 3.0) es un "factor mágico" que puedes ajustar si
+        # quieres el texto un poco más grande o más pequeño en general.
+        dimension_minima = min(ancho_mm, alto_mm)
+        base_font_size_pt = dimension_minima / 3.0
         
+        print(f"Tamaño de etiqueta: {ancho_mm}x{alto_mm}mm. Tamaño de fuente base calculado: {base_font_size_pt:.2f}pt")
+        # --- FIN DE LA LÓGICA INTELIGENTE ---
+
+        barcodes_b64 = PrintService.generar_barcodes_base64(datos_producto)
+        
+        # Pasamos el tamaño de fuente calculado a la plantilla
+        contexto_renderizado = {
+            **datos, 
+            **barcodes_b64,
+            "base_font_size_pt": base_font_size_pt
+        }
+        html_string = render_template('label.html', **contexto_renderizado)
+
         ruta_temporal = PrintService.convertir_html_a_imagen(html_string, ancho_mm, alto_mm, nombre_impresora)
         
         for i in range(cantidad):
