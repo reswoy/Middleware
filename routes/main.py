@@ -38,9 +38,9 @@ def imprimir_etiqueta_api():
 
         ancho_mm = config_impresora['ancho_mm']
         alto_mm = config_impresora['alto_mm']
-
-        ruta_temporal = PrintService.convertir_html_a_imagen(html_string, ancho_mm, alto_mm)
-
+        
+        ruta_temporal = PrintService.convertir_html_a_imagen(html_string, ancho_mm, alto_mm, nombre_impresora)
+        
         for i in range(cantidad):
             print(f"Enviando copia de imagen {i + 1}/{cantidad} a '{nombre_impresora}'...")
             PrintService.imprimir_imagen(ruta_temporal, nombre_impresora)
