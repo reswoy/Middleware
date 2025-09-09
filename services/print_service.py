@@ -236,37 +236,58 @@ class PrintService:
     @staticmethod
     def obtener_impresoras_activas():
         """
-        Escanea el sistema en busca de impresoras que están listas para imprimir.
+        Escanea el sistema en busca de impresoras listas y obtiene su
+        configuración de papel predeterminada (ancho y alto).
         """
-        print("Escaneando impresoras listas en el sistema...")
+        print("Escaneando impresoras listas y su configuración de papel...")
         try:
             pythoncom.CoInitialize()
             c = wmi.WMI()
             impresoras_detalladas = []
 
             for printer in c.Win32_Printer():
-                # El filtro definitivo y más preciso
-                es_fisicamente_online = (printer.PrinterState & 16) == 0 
+                # Usamos los mismos filtros que ya tenías para impresoras listas
+                es_fisicamente_online = (printer.PrinterState & 16) == 0
                 esta_lista_para_imprimir = printer.PrinterStatus == 3
 
                 if es_fisicamente_online and esta_lista_para_imprimir:
-                    port_name = printer.PortName
-                    port = port_name
-            
+                    ancho_mm = None
+                    alto_mm = None
+                
+                    # --- INICIO DE LA LÓGICA PARA OBTENER TAMAÑO DE PAPEL ---
+                    try:
+                        # Abrimos la impresora para obtener un "handle" o manejador
+                        h_printer = win32print.OpenPrinter(printer.Name)
+                        try:
+                            # Obtenemos las propiedades de la impresora (nivel 2 para DEVMODE)
+                            properties = win32print.GetPrinter(h_printer, 2)
+                            devmode = properties['pDevMode']
+                        
+                            # Los valores en DEVMODE vienen en décimas de milímetro,
+                            # los convertimos a mm dividiendo por 10.
+                            if devmode.PaperWidth > 0 and devmode.PaperLength > 0:
+                                ancho_mm = devmode.PaperWidth / 10.0
+                                alto_mm = devmode.PaperLength / 10.0
+                        finally:
+                            # Es crucial cerrar el manejador de la impresora
+                            win32print.ClosePrinter(h_printer)
+                    except pywin_error as e:
+                        print(f"ADVERTENCIA: No se pudo obtener el tamaño de papel para '{printer.Name}'. Error: {e}")
+                    # --- FIN DE LA LÓGICA ---
+
                     printer_info = {
                         "name": printer.Name,
-                        "port": port
+                        "port": printer.PortName,
+                        "ancho_mm": ancho_mm, # <-- NUEVO CAMPO CON EL ANCHO
+                        "alto_mm": alto_mm    # <-- NUEVO CAMPO CON EL ALTO
                     }
                     print(f"Impresora lista encontrada: {printer_info}")
                     impresoras_detalladas.append(printer_info)
 
-            if not impresoras_detalladas:
-                print("ADVERTENCIA: No se encontraron impresoras en estado 'En Línea' y 'Lista/Inactiva'.")
-
             return impresoras_detalladas
-        
+    
         except Exception as e:
-            print(f"ERROR al escanear impresoras con WMI: {e}")
+            print(f"ERROR al escanear impresoras: {e}")
             return []
         finally:
             pythoncom.CoUninitialize()
@@ -410,55 +431,65 @@ class PrintService:
         except Exception as e:
             raise RuntimeError(f"Error en el proceso de conversión de imagen adaptativa: {str(e)}")
         
+    # print_service.py
+
     @staticmethod
-    def imprimir_imagen(ruta_imagen, nombre_impresora):
+    def imprimir_imagen(ruta_imagen, nombre_impresora, ancho_mm, alto_mm):
         """
-        Imprime una imagen, escalándola proporcionalmente y centrándola en el papel
-        para evitar distorsiones.
+        Imprime una imagen, forzando al driver de la impresora a usar un
+        tamaño de papel personalizado y definido por el usuario para este trabajo.
         """
-        print(f"Imprimiendo imagen '{ruta_imagen}' en '{nombre_impresora}' con escalado proporcional...")
-        hDC = None
-        memDC = None
+        print(f"Forzando impresión en '{nombre_impresora}' con tamaño {ancho_mm}x{alto_mm} mm...")
+        hDC_handler = None
         try:
+            h_printer = win32print.OpenPrinter(nombre_impresora)
+            try:
+                properties = win32print.GetPrinter(h_printer, 2)
+                devmode = properties['pDevMode']
+
+                # --- INICIO DE LA MODIFICACIÓN CLAVE ---
+
+                # 1. Se indica explícitamente al driver que el tamaño es personalizado.
+                # El valor 256 (DMPAPER_USER) le dice que ignore los tamaños predefinidos.
+                devmode.PaperSize = 256 
+
+                # 2. Se establecen las dimensiones deseadas (en décimas de mm)
+                devmode.PaperWidth = int(ancho_mm * 10)
+                devmode.PaperLength = int(alto_mm * 10)
+            
+                # 3. Se actualizan los campos para que el driver sepa qué hemos cambiado.
+                # Añadimos DM_PAPERSIZE a la lista.
+                devmode.Fields = devmode.Fields | win32con.DM_PAPERWIDTH | win32con.DM_PAPERLENGTH | win32con.DM_PAPERSIZE
+
+                # --- FIN DE LA MODIFICACIÓN CLAVE ---
+
+                raw_hdc = win32gui.CreateDC("WINSPOOL", nombre_impresora, devmode)
+                hDC_handler = win32ui.CreateDCFromHandle(raw_hdc)
+
+            finally:
+                win32print.ClosePrinter(h_printer)
+        
             img = Image.open(ruta_imagen)
-            img_width, img_height = img.size
-            hDC = win32ui.CreateDC()
-            hDC.CreatePrinterDC(nombre_impresora)
-            printable_width = hDC.GetDeviceCaps(win32con.HORZRES)
-            printable_height = hDC.GetDeviceCaps(win32con.VERTRES)
-            scale_w = printable_width / img_width
-            scale_h = printable_height / img_height
-            scale = min(scale_w, scale_h)
-            dest_width = int(img_width * scale)
-            dest_height = int(img_height * scale)
-            dest_x = (printable_width - dest_width) // 2
-            dest_y = (printable_height - dest_height) // 2
-            print(f"Destino en papel: {dest_width}x{dest_height}px en la posición ({dest_x},{dest_y})")
-            memDC = hDC.CreateCompatibleDC()
-            saveBitMap = win32ui.CreateBitmap()
-            saveBitMap.CreateCompatibleBitmap(hDC, img_width, img_height)
-            memDC.SelectObject(saveBitMap)
+        
+            printable_width = hDC_handler.GetDeviceCaps(win32con.HORZRES)
+            printable_height = hDC_handler.GetDeviceCaps(win32con.VERTRES)
+
+            hDC_handler.StartDoc(ruta_imagen)
+            hDC_handler.StartPage()
+
             dib = ImageWin.Dib(img)
-            dib.draw(memDC.GetHandleOutput(), (0, 0, img_width, img_height))
-            hDC.StartDoc(ruta_imagen)
-            hDC.StartPage()
-            hDC.StretchBlt(
-                (dest_x, dest_y), (dest_width, dest_height),
-                memDC, (0, 0), (img_width, img_height),
-                win32con.SRCCOPY
-            )
-            hDC.EndPage()
-            hDC.EndDoc()
-            print("Imagen escalada proporcionalmente y enviada a la impresora.")
+            dib.draw(hDC_handler.GetHandleOutput(), (0, 0, printable_width, printable_height))
+
+            hDC_handler.EndPage()
+            hDC_handler.EndDoc()
+        
+            print("Imagen enviada a la impresora con la configuración de papel personalizada.")
             return True
+
         except pywin_error as e:
             raise RuntimeError(f"Error de la API de Windows al imprimir: {e}")
         except Exception as e:
             raise RuntimeError(f"Error inesperado al imprimir imagen: {e}")
         finally:
-            if 'saveBitMap' in locals() and saveBitMap.GetHandle() != 0:
-                win32gui.DeleteObject(saveBitMap.GetHandle())
-            if memDC:
-                memDC.DeleteDC()
-            if hDC:
-                hDC.DeleteDC()
+            if hDC_handler:
+                hDC_handler.DeleteDC()
