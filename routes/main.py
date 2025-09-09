@@ -60,7 +60,7 @@ def imprimir_etiqueta_api():
         
         for i in range(cantidad):
             print(f"Enviando copia de imagen {i + 1}/{cantidad} a '{nombre_impresora}'...")
-            PrintService.imprimir_imagen(ruta_temporal, nombre_impresora)
+            PrintService.imprimir_imagen(ruta_temporal, nombre_impresora, ancho_mm, alto_mm)
 
         return jsonify({
             "success": True,
