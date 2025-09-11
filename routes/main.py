@@ -30,25 +30,30 @@ def imprimir_etiqueta_api():
         datos_producto = datos['datos_producto']
         config_impresora = datos['config_impresora']
         cantidad = datos['cantidad']
-        nombre_impresora = obtener_impresora_actual()
+        
+        # ===== INICIO DE LA MODIFICACIÓN CLAVE =====
+        # 1. Leemos el nombre de la impresora directamente del payload que envía Odoo.
+        nombre_impresora = config_impresora.get('printer_name')
+
+        # 2. Añadimos una validación para asegurarnos de que el nombre no venga vacío.
+        if not nombre_impresora:
+            # Si Odoo no envía un nombre, devolvemos un error claro.
+            raise ValueError("El payload de Odoo no incluyó el 'printer_name' en 'config_impresora'.")
+            
+        # La vieja línea "nombre_impresora = obtener_impresora_actual()" se ha eliminado.
+        # ===== FIN DE LA MODIFICACIÓN CLAVE =====
 
         ancho_mm = config_impresora['ancho_mm']
         alto_mm = config_impresora['alto_mm']
 
-        # --- INICIO DE LA LÓGICA INTELIGENTE ---
-        # Calculamos un tamaño de fuente base en puntos (pt)
-        # basado en la dimensión más pequeña de la etiqueta.
-        # El divisor (ej: 3.0) es un "factor mágico" que puedes ajustar si
-        # quieres el texto un poco más grande o más pequeño en general.
+        # --- Lógica de cálculo de fuente (sin cambios) ---
         dimension_minima = min(ancho_mm, alto_mm)
         base_font_size_pt = dimension_minima / 3.0
         
         print(f"Tamaño de etiqueta: {ancho_mm}x{alto_mm}mm. Tamaño de fuente base calculado: {base_font_size_pt:.2f}pt")
-        # --- FIN DE LA LÓGICA INTELIGENTE ---
-
+        
         barcodes_b64 = PrintService.generar_barcodes_base64(datos_producto)
         
-        # Pasamos el tamaño de fuente calculado a la plantilla
         contexto_renderizado = {
             **datos, 
             **barcodes_b64,
@@ -60,6 +65,7 @@ def imprimir_etiqueta_api():
         
         for i in range(cantidad):
             print(f"Enviando copia de imagen {i + 1}/{cantidad} a '{nombre_impresora}'...")
+            # Pasamos el nombre de impresora correcto al servicio de impresión
             PrintService.imprimir_imagen(ruta_temporal, nombre_impresora, ancho_mm, alto_mm)
 
         return jsonify({
@@ -78,7 +84,7 @@ def imprimir_etiqueta_api():
         }), 500
 
     finally:
-        # --- CAMBIO IMPORTANTE: Comentamos la limpieza para poder inspeccionar el archivo ---
+        # La limpieza sigue desactivada para depuración
         if ruta_temporal:
             # PrintService.programar_limpieza(ruta_temporal)
             print(f"!! MODO DEBUG: La limpieza del archivo temporal '{ruta_temporal}' está desactivada.")
