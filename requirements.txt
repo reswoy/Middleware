@@ -1,10 +1,11 @@
-Flask==2.3.3
-pywin32==306
-WMI==1.5.1
+Flask
+pywin32
+WMI
 # Dependencias adicionales requeridas por el middleware
-imgkit==1.2.3
-python-barcode==0.15.1
-Pillow==10.4.0
-WeasyPrint>=62.0
-python-dotenv>=1.0.1
-pyppeteer>=2.0.0
+imgkit
+python-barcode
+Pillow
+WeasyPrint
+python-dotenv
+pyppeteer
+waitress
